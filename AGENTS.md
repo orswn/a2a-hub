@@ -53,6 +53,10 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 ## Releases
 
 - SemVer. `CHANGELOG.md` headings are `## [x.y.z] - YYYY-MM-DD`.
-- A release is one `chore(release): vX.Y.Z` commit and a signed `vX.Y.Z` tag. The commit updates `CHANGELOG.md` and the version in the root `package.json`.
+- A release is one `chore(release): vX.Y.Z` commit and a signed `vX.Y.Z` tag on it. Steps:
+  1. Move the `## [Unreleased]` entries to `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`.
+  2. Set `"version"` in the root `package.json` to `X.Y.Z`, equal to the tag without `v`. Clients install `@orswn/a2a-hub-protocol` from that tag.
+  3. Run `make verify`.
+  4. Commit as `chore(release): vX.Y.Z`, then `git tag -s vX.Y.Z`.
 - The binary takes its version from the tag through `-ldflags "-X main.version=<version>"`.
 - Commit headers follow Conventional Commits. Bodies follow the Linux kernel style.
