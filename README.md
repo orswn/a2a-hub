@@ -83,6 +83,10 @@ make verify
 - Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that protocol 2 has not changed.
 - Contract suite: `CONTRACT_PENDING=1 npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema. `CONTRACT_PENDING=1` skips the cases of the routes that do not exist yet.
 
+## Known wire differences from the TypeScript hub
+
+- A path with a percent escape that is not hex, such as `/agents/%zz`, gets `400` with a `text/plain` body from Go's HTTP server. The TypeScript hub answers `400` with `{"error":"malformed percent escape in path"}`. An escape that decodes to invalid UTF-8, such as `%ff`, gets the JSON body in both hubs.
+
 ## Protocol package
 
 `@orswn/a2a-hub-protocol` is the repository root package. It ships `protocol/`: the TypeBox schemas, the wire types, the constants, the route manifest, and `hub-protocol-v<N>.json`. A client installs it from git:

@@ -90,8 +90,8 @@ func TestMalformedPercentEscapeIsBadRequest(t *testing.T) {
 	}
 }
 
-// net/http refuses an escape that is not hex before the handler runs. It answers 400 with a text/plain body.
-// FIXME(okka): the TypeScript hub answers a JSON error body here. Accept the difference or answer JSON.
+// net/http parses the request target with url.ParseRequestURI before any handler runs, so a non-hex escape
+// gets its own 400 with a text/plain body, not the JSON error body of the TypeScript hub.
 func TestEscapeThatIsNotHexIsBadRequest(t *testing.T) {
 	ts := httptest.NewServer(New(Options{Version: "1.2.3"}))
 	defer ts.Close()
