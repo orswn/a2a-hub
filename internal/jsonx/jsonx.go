@@ -6,6 +6,9 @@
 //
 // A parsed value is one of: Null, bool, float64, string, []any, or *Object. A Go nil is JavaScript
 // undefined: an object drops the key and an array prints null.
+//
+// One difference stays: a Go string holds UTF-8, so a lone surrogate escape such as "\ud800" parses to
+// U+FFFD and prints as that character. JSON.stringify(JSON.parse(...)) keeps the "\ud800" escape.
 package jsonx
 
 import (

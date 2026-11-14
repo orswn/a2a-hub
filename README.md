@@ -94,6 +94,8 @@ make verify
 Known engine differences, not on the wire yet:
 
 - A `statusTimestampAfter` filter takes only the ISO 8601 forms of `Date.parse`. The TypeScript hub also takes the forms of the V8 legacy date parser, such as `Jan 1 2026` or `2026-02-30`.
+- Status text is cut at 160 UTF-16 units. When the cut splits a surrogate pair, this hub drops the whole pair. The TypeScript hub keeps the lone high surrogate, and its sqlite driver stores it as U+FFFD, so the stored text ends in one more character.
+- The config-time push URL check does not map fullwidth digits or decode percent escapes in the host. `http://１２７.０.０.１/` passes it and fails at send time. `http://%31%32%37.0.0.1/` gets `push config url is not a valid URL`. The TypeScript hub reads both hosts as `127.0.0.1` and refuses them at config time with `push url address 127.0.0.1 is not allowed`.
 
 ## Protocol package
 
