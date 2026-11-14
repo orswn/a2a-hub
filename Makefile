@@ -34,7 +34,7 @@ test/node_modules/.package-lock.json: test/package-lock.json
 protocol-test: protocol/node_modules/.package-lock.json
 	$(RUN) npm --prefix protocol test
 
-# CONTRACT_PENDING=1 skips the contract cases of routes that the hub does not serve yet.
+# CONTRACT_PENDING=1 expects the contract cases of routes that the hub does not serve yet to fail.
 contract: bin/a2a-hub test/node_modules/.package-lock.json
 	CONTRACT_PENDING=1 HUB_BIN=$(CURDIR)/bin/a2a-hub $(RUN) npm --prefix test run contract
 

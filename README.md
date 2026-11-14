@@ -82,7 +82,7 @@ make verify
 
 - Go unit tests: `mise exec -- go test -race ./...`.
 - Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that protocol 2 has not changed.
-- Contract suite: `CONTRACT_PENDING=1 npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema. `CONTRACT_PENDING=1` skips the cases of the routes that do not exist yet.
+- Contract suite: `CONTRACT_PENDING=1 npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema. `CONTRACT_PENDING=1` expects the cases of the routes that do not exist yet to fail. Such a case that passes fails the run.
 
 ## Known wire differences from the TypeScript hub
 

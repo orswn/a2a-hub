@@ -45,8 +45,9 @@ const events = document["x-events"];
 const BODY_LIMIT = 1024 * 1024;
 
 /**
- * Env `CONTRACT_PENDING=1` skips the cases that need routes that the Go hub does not serve yet, and the
- * coverage check. Remove it with this list once the link and A2A routes exist.
+ * Env `CONTRACT_PENDING=1` expects the cases that need routes that the Go hub does not serve yet to fail, and
+ * skips the coverage check. A pending case that passes fails the run, so remove it from the list. Remove the
+ * env and this list once the link and A2A routes exist.
  */
 const PENDING = process.env["CONTRACT_PENDING"] === "1";
 const PENDING_CASES = new Set([
@@ -58,8 +59,10 @@ const PENDING_CASES = new Set([
 	"closes a child, replaces an older stream, acks, and goes offline",
 	"gives the listed error bodies",
 ]);
+const registered = new Set<string>();
 function it(name: string, fn: TestFunction): void {
-	(PENDING && PENDING_CASES.has(name) ? vitestIt.skip : vitestIt)(name, fn);
+	registered.add(name);
+	(PENDING && PENDING_CASES.has(name) ? vitestIt.fails : vitestIt)(name, fn);
 }
 
 /**
@@ -432,4 +435,8 @@ describe("hub link contract", () => {
 		const threads = await fails(409, "GET", `/link/${beta}/thread/twin-ctx-`);
 		expect((threads["candidates"] as unknown[]).length).toBe(2);
 	});
+});
+
+vitestIt("lists only registered cases as pending", () => {
+	expect([...PENDING_CASES].filter((name) => !registered.has(name))).toEqual([]);
 });
