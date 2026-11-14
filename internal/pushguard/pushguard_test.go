@@ -74,6 +74,9 @@ func TestRefusesAnIPLiteralInADeniedRangeAtConfigTimeAndLeavesHostNamesToSendTim
 	match(t, "one number", checkURL(g, "http://2130706433/"), `127\.0\.0\.1`)
 	match(t, "host name", checkURL(g, "https://hooks.example/a"), "")
 	match(t, "public", checkURL(g, "https://93.184.216.34/a"), "")
+	// new URL() refuses an IPv6 zone. The guard must too: a zoned address is in no denied range.
+	match(t, "zoned link-local", checkURL(g, "http://[fe80::1%25eth0]/x"), "^push config url is not a valid URL$")
+	match(t, "zoned loopback", checkURL(g, "http://[::1%25lo]/x"), "^push config url is not a valid URL$")
 }
 
 func TestChecksEveryResolvedAddressAtSendTime(t *testing.T) {
@@ -81,6 +84,7 @@ func TestChecksEveryResolvedAddressAtSendTime(t *testing.T) {
 		"public.example": {"93.184.216.34"},
 		"rebind.example": {"93.184.216.34", "10.0.0.7"},
 		"inside.example": {"192.168.0.10"},
+		"zoned.example":  {"93.184.216.34", "fe80::1%eth0"},
 	}))
 	ctx := context.Background()
 	match(t, "public", g.CheckSend(ctx, "https://public.example/hook"), "")
@@ -88,6 +92,14 @@ func TestChecksEveryResolvedAddressAtSendTime(t *testing.T) {
 	match(t, "inside", g.CheckSend(ctx, "https://inside.example/hook"), `192\.168\.0\.10`)
 	match(t, "missing", g.CheckSend(ctx, "https://missing.example/hook"), `ENOTFOUND`)
 	match(t, "literal", g.CheckSend(ctx, "http://127.0.0.1:9/hook"), `127\.0\.0\.1`)
+	match(t, "zoned literal", g.CheckSend(ctx, "http://[::1%25lo]/hook"), "^push config url is not a valid URL$")
+	match(t, "zoned answer", g.CheckSend(ctx, "https://zoned.example/hook"), `fe80::1%eth0, which is not allowed`)
+	match(t, "zoned host", g.CheckHost("::1%lo"), `::1%lo is not allowed`)
+	for _, ip := range []string{"::1%lo", "fe80::1%eth0", "::ffff:127.0.0.1%x"} {
+		if g.AddressAllowed(netip.MustParseAddr(ip)) {
+			t.Errorf("%s allowed", ip)
+		}
+	}
 }
 
 func TestAllowsHostNamesAndCIDRsFromTheAllowList(t *testing.T) {
@@ -142,6 +154,8 @@ func TestParseURLGivesTheWHATWGHost(t *testing.T) {
 		"http://":                              "",
 		"not a url":                            "",
 		"https://user:pass@hooks.example/path": "hooks.example",
+		"http://[fe80::1%25eth0]/x":            "",
+		"http://[::1%25lo]/x":                  "",
 	}
 	for raw, want := range cases {
 		u, err := ParseURL(raw)

@@ -74,9 +74,10 @@ func unmapPrefix(p netip.Prefix) netip.Prefix {
 	return p
 }
 
-// AddressAllowed reports whether the hub may send to ip. An IPv4-mapped IPv6 address counts as its IPv4 address.
+// AddressAllowed reports whether the hub may send to ip. An IPv4-mapped IPv6 address counts as its IPv4 address,
+// and a zoned address counts as the address without its zone.
 func (g *Guard) AddressAllowed(ip netip.Addr) bool {
-	ip = ip.Unmap()
+	ip = ip.WithZone("").Unmap()
 	if g != nil {
 		for _, p := range g.allowed {
 			if p.Contains(ip) {
@@ -141,10 +142,7 @@ func (g *Guard) CheckSend(ctx context.Context, rawURL string) string {
 
 func hostAddr(host string) (netip.Addr, bool) {
 	ip, err := netip.ParseAddr(host)
-	if err != nil || ip.Zone() != "" {
-		return netip.Addr{}, false
-	}
-	return ip, true
+	return ip, err == nil
 }
 
 // URL is a push URL with its host in the form a WHATWG URL parser gives: lower case, no brackets or trailing
@@ -178,7 +176,7 @@ func ParseURL(raw string) (URL, error) {
 	}
 	if strings.HasPrefix(u.Host, "[") {
 		ip, err := netip.ParseAddr(host)
-		if err != nil || !ip.Is6() {
+		if err != nil || !ip.Is6() || ip.Zone() != "" {
 			return URL{}, ErrInvalidURL
 		}
 		return URL{Scheme: scheme, Host: formatIPv6(ip)}, nil
