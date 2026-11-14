@@ -32,7 +32,7 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 - Comments only for a non-obvious why: a hidden constraint, an invariant, a workaround. One or two lines.
 - Deferred work gets a `FIXME(okka): ...` comment.
 - Go unit tests live next to the package. Inject a clock and an id generator where a test needs fixed times or ids.
-- Store migrations are append-only. Never edit a released migration. A migration that drops or renames a table that another table references sets `RebuildsTables`.
+- Store migrations are append-only. Never edit a released migration. Each migration runs with foreign keys off, so a `DROP TABLE` does not cascade. `PRAGMA foreign_key_check` must then find no row, else the migration rolls back. The error names the table and rowid of each orphan row.
 
 ## Wire parity
 

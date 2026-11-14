@@ -24,12 +24,10 @@ const (
 	walPragma   = "_pragma=journal_mode(WAL)&"
 )
 
-// Migration is one schema change. Its SQL runs in one transaction together with the user_version update.
+// Migration is one schema change. Its SQL runs through RebuildTables, in one transaction together with the
+// user_version update.
 type Migration struct {
 	SQL string
-	// RebuildsTables runs the migration through RebuildTables. Set it for a migration that drops or renames
-	// a table that other tables reference, such as a rebuild for a CHECK change.
-	RebuildsTables bool
 }
 
 // NewerSchemaError is a database written by a newer hub.
@@ -93,12 +91,9 @@ func Migrate(ctx context.Context, db *sql.DB, migrations []Migration) error {
 			_, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version+1))
 			return err
 		}
-		if migration.RebuildsTables {
-			err = RebuildTables(ctx, conn, apply)
-		} else {
-			err = inTransaction(ctx, conn, apply)
-		}
-		if err != nil {
+		// Every migration runs with foreign keys off, so a DROP TABLE cannot cascade into child rows. A
+		// migration that would have cascaded fails at the foreign key check instead.
+		if err := RebuildTables(ctx, conn, apply); err != nil {
 			return fmt.Errorf("migrate schema %d to %d: %w", version, version+1, err)
 		}
 	}
@@ -125,13 +120,13 @@ func rollback(ctx context.Context, conn *sql.Conn, cause error) error {
 	return cause
 }
 
-// ForeignKeyError lists the rows that a rebuild left without their parent row.
+// ForeignKeyError lists the rows that have no parent row at the end of a rebuild.
 type ForeignKeyError struct {
 	Violations []string
 }
 
 func (e *ForeignKeyError) Error() string {
-	return "rebuild breaks foreign keys: " + strings.Join(e.Violations, ", ")
+	return "foreign key check failed: " + strings.Join(e.Violations, ", ")
 }
 
 // RebuildTables runs body in one transaction with foreign keys off, for a change that drops or renames a
@@ -170,7 +165,11 @@ func foreignKeyCheck(ctx context.Context, conn *sql.Conn) error {
 		if err := rows.Scan(&table, &rowid, &parent, &index); err != nil {
 			return err
 		}
-		violations = append(violations, fmt.Sprintf("%s row %d has no %s row", table, rowid.Int64, parent))
+		row := "a row without rowid"
+		if rowid.Valid {
+			row = fmt.Sprintf("row %d", rowid.Int64)
+		}
+		violations = append(violations, fmt.Sprintf("%s %s has no %s row", table, row, parent))
 	}
 	if err := rows.Err(); err != nil {
 		return err

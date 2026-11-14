@@ -272,11 +272,11 @@ func TestRebuildWithForeignKeysOnDeletesLinkEvents(t *testing.T) {
 	}
 }
 
-func TestMigrationThatRebuildsTables(t *testing.T) {
+func TestMigrationThatDropsAReferencedTableKeepsItsChildRows(t *testing.T) {
 	dir := t.TempDir()
 	db := open(t, dir)
 	seedLinkEvents(t, db)
-	migrations := append(append([]Migration{}, Migrations...), Migration{SQL: agentsWithSessionKind, RebuildsTables: true})
+	migrations := append(append([]Migration{}, Migrations...), Migration{SQL: agentsWithSessionKind})
 	if err := Migrate(context.Background(), db, migrations); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -288,6 +288,22 @@ func TestMigrationThatRebuildsTables(t *testing.T) {
 	}
 	if got := scalar[int](t, db, "PRAGMA foreign_keys"); got != 1 {
 		t.Errorf("foreign_keys = %d, want 1", got)
+	}
+}
+
+func TestMigrationNamesTheRowThatBreaksAForeignKey(t *testing.T) {
+	db := open(t, Memory)
+	seedLinkEvents(t, db)
+	migrations := append(append([]Migration{}, Migrations...), Migration{SQL: "DELETE FROM agents WHERE id = 'a1';"})
+	err := Migrate(context.Background(), db, migrations)
+	if err == nil || err.Error() != "migrate schema 2 to 3: foreign key check failed: link_events row 1 has no agents row" {
+		t.Fatalf("Migrate = %v", err)
+	}
+	if got := scalar[int](t, db, "PRAGMA user_version"); got != 2 {
+		t.Errorf("user_version = %d, want 2", got)
+	}
+	if got := scalar[int](t, db, "SELECT count(*) FROM agents"); got != 3 {
+		t.Errorf("agents = %d, want 3 after the rollback", got)
 	}
 }
 
