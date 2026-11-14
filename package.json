@@ -10,7 +10,10 @@
 		"url": "git@github.com:orswn/a2a-hub.git"
 	},
 	"files": [
-		"protocol/"
+		"protocol/src/protocol.ts",
+		"protocol/src/protocol.schema.ts",
+		"protocol/src/routes.ts",
+		"protocol/schema/"
 	],
 	"exports": {
 		".": "./protocol/src/protocol.ts",
