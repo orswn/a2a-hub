@@ -44,7 +44,7 @@ func (e *NewerSchemaError) Error() string {
 func Open(ctx context.Context, path string) (*sql.DB, error) {
 	dsn := "file:" + Memory + "?" + connPragmas
 	if path != Memory {
-		if err := os.MkdirAll(path, 0o777); err != nil {
+		if err := os.MkdirAll(path, 0o777); err != nil { //nolint:gosec // G301: the umask decides, like mkdirSync in the TypeScript hub.
 			return nil, err
 		}
 		dsn = "file:" + uriPath(filepath.Join(path, FileName)) + "?" + walPragma + connPragmas

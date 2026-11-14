@@ -134,7 +134,7 @@ func LoadTokens(file string) (*TokenTable, error) {
 	if file == "" {
 		return &TokenTable{}, nil
 	}
-	text, err := os.ReadFile(file)
+	text, err := os.ReadFile(file) //nolint:gosec // G304: the operator gives the token file path.
 	if err != nil {
 		return nil, err
 	}

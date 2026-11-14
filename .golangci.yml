@@ -8,12 +8,6 @@ linters:
     - misspell
     - nolintlint
     - unconvert
-  settings:
-    gosec:
-      excludes:
-        # The data and config paths come from the operator, not from a request.
-        - G304
-        - G301
   exclusions:
     presets:
       - std-error-handling
