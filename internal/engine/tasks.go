@@ -110,7 +110,7 @@ func (e *Engine) GetTask(agentID string, caller Caller, id string, historyLength
 }
 
 // WatchTask reads a task like GetTask and registers fn for its later changes in the same call, so no change
-// falls between the read and the watch. The result removes fn.
+// falls between the read and the watch. The result removes fn. The listener rules of OnTask apply.
 func (e *Engine) WatchTask(agentID string, caller Caller, id string, historyLength *int, fn func(TaskEvent)) (*Task, func(), error) {
 	var off func()
 	task, err := call(e, func() *Task {
@@ -354,7 +354,7 @@ type SendInput struct {
 	PushConfig *PushConfigInput
 	// Watch, when set and the send makes or continues a task, gets the later changes of that task. It is
 	// registered inside the call, so it misses no change that another caller commits after the send, and it
-	// gets none of the send's own events. SendResult.Unwatch removes it.
+	// gets none of the send's own events. SendResult.Unwatch removes it. The listener rules of OnTask apply.
 	Watch func(TaskEvent)
 }
 

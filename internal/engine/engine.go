@@ -290,7 +290,10 @@ func (e *Engine) ListenerCount(taskID string) int {
 }
 
 // OnTask calls listener after each committed change of the task. The result removes the listener.
-
+//
+// Listener rules, for every On method: a listener must not block and must not call a blocking engine wait,
+// such as WaitForTask or WaitForAck, because one goroutine runs the listeners of all callers in turn. It may
+// run after the call that made the change returned, and after the function that removes it returned.
 func (e *Engine) OnTask(taskID string, listener func(TaskEvent)) func() {
 	return e.addTaskListener(taskID, listener)
 }
@@ -317,28 +320,28 @@ func (e *Engine) addTaskListener(taskID string, listener func(TaskEvent)) func()
 	}
 }
 
-// OnLink calls listener with each committed link event.
+// OnLink calls listener with each committed link event. The rules of OnTask apply.
 func (e *Engine) OnLink(listener func(agentID string, event LinkEvent)) func() {
 	var id int
 	e.listeners(func() { id = e.linkListeners.add(listener) })
 	return func() { e.listeners(func() { e.linkListeners.remove(id) }) }
 }
 
-// OnAck calls listener after each ack.
+// OnAck calls listener after each ack. The rules of OnTask apply.
 func (e *Engine) OnAck(listener func(agentID string, upTo int64)) func() {
 	var id int
 	e.listeners(func() { id = e.ackListeners.add(listener) })
 	return func() { e.listeners(func() { e.ackListeners.remove(id) }) }
 }
 
-// OnPush calls listener after a commit that queued a push.
+// OnPush calls listener after a commit that queued a push. The rules of OnTask apply.
 func (e *Engine) OnPush(listener func()) func() {
 	var id int
 	e.listeners(func() { id = e.pushListeners.add(listener) })
 	return func() { e.listeners(func() { e.pushListeners.remove(id) }) }
 }
 
-// OnExternal calls listener after a commit that queued work for an external agent.
+// OnExternal calls listener after a commit that queued work for an external agent. The rules of OnTask apply.
 func (e *Engine) OnExternal(listener func()) func() {
 	var id int
 	e.listeners(func() { id = e.externalListeners.add(listener) })

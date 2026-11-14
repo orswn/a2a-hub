@@ -149,7 +149,8 @@ func (s *linkSub) pump() {
 	}
 }
 
-// Ack marks the events up to upTo as acked and returns how many were open.
+// Ack marks the events up to upTo as acked and returns how many were open. upTo is the value as jsonx parses
+// it from the request body: a float64 for a JSON number. Any other type, a Go int too, gets the refusal.
 func (e *Engine) Ack(agentID string, upTo any) (int64, error) {
 	return call(e, func() int64 {
 		n, ok := upTo.(float64)
