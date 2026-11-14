@@ -147,6 +147,56 @@ func TestHealthcheckSubcommand(t *testing.T) {
 	}
 }
 
+func TestHealthcheckHost(t *testing.T) {
+	cases := map[string]string{
+		"":          "127.0.0.1",
+		"0.0.0.0":   "127.0.0.1",
+		"::":        "::1",
+		"127.0.0.2": "127.0.0.2",
+		"::1":       "::1",
+		"localhost": "localhost",
+	}
+	for host, want := range cases {
+		if got := healthcheckHost(host); got != want {
+			t.Errorf("healthcheckHost(%q) = %q, want %q", host, got, want)
+		}
+	}
+}
+
+func TestHealthcheckDialsTheListenHost(t *testing.T) {
+	probe, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	_ = probe.Close()
+	h := startHub(t, "--listen", "[::1]:0", "--data", store.Memory, "--test-agents")
+	port := strconv.Itoa(h.port)
+	cases := []struct {
+		listen string
+		code   int
+	}{
+		{"[::1]:" + port, 0},
+		{"[::]:" + port, 0},
+		{"127.0.0.1:" + port, 1},
+		{"0.0.0.0:" + port, 1},
+	}
+	for _, c := range cases {
+		if code := run([]string{"healthcheck", "--listen", c.listen}, noEnv, io.Discard, io.Discard, nil); code != c.code {
+			t.Errorf("healthcheck --listen %s = %d, want %d", c.listen, code, c.code)
+		}
+		env := func(name string) (string, bool) {
+			if name == "HUB_LISTEN" {
+				return c.listen, true
+			}
+			return "", false
+		}
+		var stderr bytes.Buffer
+		if code := run([]string{"healthcheck"}, env, io.Discard, &stderr, nil); code != c.code {
+			t.Errorf("healthcheck with HUB_LISTEN=%s = %d, want %d: %s", c.listen, code, c.code, stderr.String())
+		}
+	}
+}
+
 func TestHealthcheckFailsOnAnotherStatus(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

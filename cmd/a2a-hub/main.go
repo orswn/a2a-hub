@@ -123,7 +123,7 @@ func signalName(sig os.Signal) string {
 	return sig.String()
 }
 
-// healthcheck asks the hub on this host for /healthz. It reads the listen port from the same flags and
+// healthcheck asks the hub on this host for /healthz. It reads the listen address from the same flags and
 // environment as the server. 0 means healthy.
 func healthcheck(args []string, env config.Env, stderr io.Writer) int {
 	cfg, err := config.Load(args, env)
@@ -132,7 +132,7 @@ func healthcheck(args []string, env config.Env, stderr io.Writer) int {
 		return 1
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	res, err := client.Get("http://127.0.0.1:" + strconv.Itoa(cfg.Port) + "/healthz")
+	res, err := client.Get("http://" + net.JoinHostPort(healthcheckHost(cfg.Host), strconv.Itoa(cfg.Port)) + "/healthz")
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
@@ -143,4 +143,15 @@ func healthcheck(args []string, env config.Env, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// healthcheckHost maps a wildcard listen host to the loopback address of the same family.
+func healthcheckHost(host string) string {
+	switch host {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::":
+		return "::1"
+	}
+	return host
 }

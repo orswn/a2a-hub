@@ -61,7 +61,7 @@ The token file maps a principal name to its kind and the sha256 hex digest of it
 }
 ```
 
-`a2a-hub healthcheck` sends `GET http://127.0.0.1:<port>/healthz`, with the port from the same flags and env, and exits `0` only for status 200.
+`a2a-hub healthcheck` sends `GET /healthz` to the listen address from the same flags and env, and exits `0` only for status 200. It dials `127.0.0.1` for the host `0.0.0.0` and `::1` for the host `::`.
 
 ### Container
 
