@@ -8,15 +8,16 @@ This is the Go port of the hub that started inside [pimon](https://github.com/or
 
 What exists now:
 
-- The server binary `a2a-hub`: flags and env, token file, the sqlite store with the same schema (`user_version` 2), `GET /healthz`, and the `healthcheck` subcommand. Every other route answers 404.
+- The server binary `a2a-hub`: flags and env, token file, the sqlite store with the same schema (`user_version` 2), `GET /healthz` with the online agent count, and the `healthcheck` subcommand. Every other route answers 404.
+- The engine (`internal/engine`), not yet on a route: agents and host binding, `@name` resolution, the task lifecycle, context follow-ups, status text, open questions, task scope, task lists with page tokens, the mailbox events with replay and ack, retention, push configs and the push outbox, and the job and dispatch rows of external agents. It writes the same rows as the TypeScript engine, so either hub opens a file that the other wrote.
+- The push URL guard (`internal/pushguard`): the config-time and send-time address checks and the allow list.
 - The protocol package `@orswn/a2a-hub-protocol` with the JSON Schema of link protocol 2.
 - The black-box contract suite of the link protocol.
 
 Planned:
 
-- The engine: agents, tasks, messages, mailbox events, presence, retention.
 - The A2A JSON-RPC and SSE routes, agent cards, the link API, and the built-in test agents.
-- Push notifications, the gateway to external agents, and the external agent file.
+- The push sender, the gateway to external agents, and the external agent file.
 - The `a2a` host CLI and the MCP endpoint for Claude Code and Codex.
 - A released container image. CI builds it now but pushes it only on a `v*` tag.
 
@@ -81,6 +82,7 @@ make verify
 ```
 
 - Go unit tests: `mise exec -- go test -race ./...`.
+- Database compatibility: the engine tests run one scenario that `internal/engine/testdata/compat.mjs` also runs with the TypeScript engine. Both must write the same rows, and the Go engine must read the committed TypeScript-written file in `testdata/compat-node` the same way. With `PIMON_DIR` set to a pimon checkout and `node` on `PATH`, the test also runs the TypeScript engine again and makes it read the file that the Go engine wrote.
 - Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that protocol 2 has not changed.
 - Contract suite: `CONTRACT_PENDING=1 npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema. `CONTRACT_PENDING=1` expects the cases of the routes that do not exist yet to fail. Such a case that passes fails the run.
 
@@ -88,6 +90,10 @@ make verify
 
 - A path with a percent escape that is not hex, such as `/agents/%zz`, gets `400` with a `text/plain` body from Go's HTTP server. The TypeScript hub answers `400` with `{"error":"malformed percent escape in path"}`. An escape that decodes to invalid UTF-8, such as `%ff`, gets the JSON body in both hubs.
 - The path splits into its non-empty segments with no other normalization. `GET //healthz` gets `200`, and `GET /x/../healthz` gets `404`. The TypeScript hub parses the request target as a WHATWG URL: `//healthz` names the host `healthz` and gets `404`, and `/x/../healthz` loses its dot segments and gets `200`.
+
+Known engine differences, not on the wire yet:
+
+- A `statusTimestampAfter` filter takes only the ISO 8601 forms of `Date.parse`. The TypeScript hub also takes the forms of the V8 legacy date parser, such as `Jan 1 2026` or `2026-02-30`.
 
 ## Protocol package
 
