@@ -71,19 +71,18 @@ func ParseTokens(text []byte) (*TokenTable, error) {
 	}
 	table := &TokenTable{}
 	for i, name := range names {
-		var spec struct {
-			Kind   any `json:"kind"`
-			Sha256 any `json:"sha256"`
-		}
-		if err := json.Unmarshal(values[i], &spec); err != nil || bytes.Equal(bytes.TrimSpace(values[i]), []byte("null")) ||
-			(spec.Kind != string(KindHost) && spec.Kind != string(KindPeer)) {
+		// A struct would match field names without regard to case. JSON.parse keys are exact.
+		var spec map[string]json.RawMessage
+		var kind string
+		if json.Unmarshal(values[i], &spec) != nil || json.Unmarshal(spec["kind"], &kind) != nil ||
+			(kind != string(KindHost) && kind != string(KindPeer)) {
 			return nil, fmt.Errorf(`token %s: kind must be "host" or "peer"`, name)
 		}
-		text, isString := spec.Sha256.(string)
-		if !isString || !digestHex.MatchString(text) {
+		var text string
+		if json.Unmarshal(spec["sha256"], &text) != nil || !digestHex.MatchString(text) {
 			return nil, fmt.Errorf("token %s: sha256 must be 64 hex chars", name)
 		}
-		e := entry{principal: Principal{Name: name, Kind: Kind(spec.Kind.(string))}}
+		e := entry{principal: Principal{Name: name, Kind: Kind(kind)}}
 		if _, err := hex.Decode(e.digest[:], []byte(text)); err != nil {
 			return nil, fmt.Errorf("token %s: %w", name, err)
 		}

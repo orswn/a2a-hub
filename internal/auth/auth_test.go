@@ -81,6 +81,21 @@ func TestRefusesTokenFileWithBadKindOrDigest(t *testing.T) {
 	}
 }
 
+// JSON.parse keys are exact, so the TypeScript hub reads only lower-case kind and sha256.
+func TestTokenEntryKeysMatchExactly(t *testing.T) {
+	if _, err := ParseTokens([]byte(`{"m": {"KIND": "host", "SHA256": "` + hexOf("a") + `"}}`)); err == nil ||
+		!strings.Contains(err.Error(), `token m: kind must be "host" or "peer"`) {
+		t.Errorf("upper-case keys: err = %v, want the kind error", err)
+	}
+	table, err := ParseTokens([]byte(`{"m": {"kind": "host", "Kind": "bad", "sha256": "` + hexOf("a") + `"}}`))
+	if err != nil {
+		t.Fatalf("a differently cased extra key: %v", err)
+	}
+	if got, ok := table.Match("a"); !ok || got != (Principal{Name: "m", Kind: KindHost}) {
+		t.Errorf("Match(a) = %+v, %v", got, ok)
+	}
+}
+
 func TestLaterDuplicateKeyWins(t *testing.T) {
 	table, err := ParseTokens([]byte(`{"a": {"kind": "host", "sha256": "` + hexOf("one") + `"}, "a": {"kind": "peer", "sha256": "` + hexOf("two") + `"}}`))
 	if err != nil {
