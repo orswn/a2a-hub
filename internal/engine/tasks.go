@@ -109,6 +109,21 @@ func (e *Engine) GetTask(agentID string, caller Caller, id string, historyLength
 	})
 }
 
+// WatchTask reads a task like GetTask and registers fn for its later changes in the same call, so no change
+// falls between the read and the watch. The result removes fn.
+func (e *Engine) WatchTask(agentID string, caller Caller, id string, historyLength *int, fn func(TaskEvent)) (*Task, func(), error) {
+	var off func()
+	task, err := call(e, func() *Task {
+		task := ApplyHistoryLength(e.toWire(e.visibleTask(agentID, caller, id), true, true), historyLength)
+		off = e.addTaskListener(id, fn)
+		return task
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return task, off, nil
+}
+
 // TaskState reads the state of a task. "" means no such task.
 func (e *Engine) TaskState(id string) (State, error) {
 	return call(e, func() State {
@@ -337,6 +352,10 @@ type SendInput struct {
 	// Message is the A2A message in ProtoJSON. Unknown fields stay.
 	Message    *jsonx.Object
 	PushConfig *PushConfigInput
+	// Watch, when set and the send makes or continues a task, gets the later changes of that task. It is
+	// registered inside the call, so it misses no change that another caller commits after the send, and it
+	// gets none of the send's own events. SendResult.Unwatch removes it.
+	Watch func(TaskEvent)
 }
 
 // SendResult holds the task, or for a message without a task the "stored" reply.
@@ -347,6 +366,8 @@ type SendResult struct {
 	// EventSeq is the seq of the link event, nil when the target has no mailbox.
 	EventSeq *int64
 	Meta     Meta
+	// Unwatch removes SendInput.Watch. It is a no-op when there is no watch.
+	Unwatch func() `json:"-"`
 }
 
 // MessageEvent is the payload of a message link event.
@@ -386,7 +407,7 @@ func (e *Engine) send(input SendInput) *SendResult {
 	if input.PushConfig != nil {
 		e.validatePushURL(input.PushConfig.URL)
 	}
-	return txValue(e, func() *SendResult {
+	result := txValue(e, func() *SendResult {
 		agent := e.requireAgent(input.AgentID)
 		sender := e.senderOf(caller)
 		var task *taskRow
@@ -512,6 +533,11 @@ func (e *Engine) send(input SendInput) *SendResult {
 		)
 		return &SendResult{Message: reply, Created: created, EventSeq: eventSeq, Meta: meta}
 	})
+	result.Unwatch = func() {}
+	if input.Watch != nil && result.Task != nil {
+		result.Unwatch = e.addTaskListener(result.Task.ID, input.Watch)
+	}
+	return result
 }
 
 // objectBody reads a value that must be an object. An array passes with no fields, as typeof gives "object"

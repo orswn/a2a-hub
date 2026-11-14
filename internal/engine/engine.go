@@ -290,7 +290,12 @@ func (e *Engine) ListenerCount(taskID string) int {
 }
 
 // OnTask calls listener after each committed change of the task. The result removes the listener.
+
 func (e *Engine) OnTask(taskID string, listener func(TaskEvent)) func() {
+	return e.addTaskListener(taskID, listener)
+}
+
+func (e *Engine) addTaskListener(taskID string, listener func(TaskEvent)) func() {
 	var id int
 	e.listeners(func() {
 		set := e.taskListeners[taskID]
