@@ -76,7 +76,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 		return err
 	}
 	hub := server.New(server.Options{Version: version, Tokens: tokens, Log: log})
-	httpServer := &http.Server{Handler: hub, ReadHeaderTimeout: 30 * time.Second}
+	httpServer := &http.Server{Handler: hub, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 5 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- httpServer.Serve(listener) }()
 	_, _ = fmt.Fprintf(stdout, "listening %d\n", listener.Addr().(*net.TCPAddr).Port)
