@@ -17,6 +17,8 @@ import (
 
 	"github.com/orswn/a2a-hub/internal/auth"
 	"github.com/orswn/a2a-hub/internal/config"
+	"github.com/orswn/a2a-hub/internal/engine"
+	"github.com/orswn/a2a-hub/internal/pushguard"
 	"github.com/orswn/a2a-hub/internal/server"
 	"github.com/orswn/a2a-hub/internal/store"
 )
@@ -66,6 +68,15 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 		return err
 	}
 	defer func() { _ = db.Close() }()
+	guard, err := pushguard.New(cfg.PushAllow, pushguard.DefaultResolver)
+	if err != nil {
+		return err
+	}
+	hubEngine, err := engine.New(context.Background(), db, engine.Options{PushGuard: guard, Log: log})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = hubEngine.Close() }()
 
 	network := "tcp"
 	if addr, err := netip.ParseAddr(cfg.Host); err == nil && addr.Is4() {
@@ -75,7 +86,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	if err != nil {
 		return err
 	}
-	hub := server.New(server.Options{Version: version, Tokens: tokens, Log: log})
+	hub := server.New(server.Options{Version: version, Tokens: tokens, Agents: hubEngine, Log: log})
 	httpServer := &http.Server{Handler: hub, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 5 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- httpServer.Serve(listener) }()

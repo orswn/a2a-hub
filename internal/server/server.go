@@ -21,19 +21,27 @@ type Options struct {
 	// Version is the hub version that /healthz reports.
 	Version string
 	Tokens  *auth.TokenTable
-	Log     func(line string)
+	// Agents counts the online agents for /healthz. nil reports 0.
+	Agents AgentCounter
+	Log    func(line string)
+}
+
+// AgentCounter counts the online agents.
+type AgentCounter interface {
+	OnlineCount() (int64, error)
 }
 
 // Server answers the hub routes.
 type Server struct {
 	version string
 	tokens  atomic.Pointer[auth.TokenTable]
+	agents  AgentCounter
 	log     func(line string)
 }
 
 // New makes a Server.
 func New(opts Options) *Server {
-	s := &Server{version: opts.Version, log: opts.Log}
+	s := &Server{version: opts.Version, agents: opts.Agents, log: opts.Log}
 	if s.log == nil {
 		s.log = func(string) {}
 	}
@@ -51,7 +59,7 @@ func (s *Server) SetTokens(tokens *auth.TokenTable) { s.tokens.Store(tokens) }
 type health struct {
 	OK      bool   `json:"ok"`
 	Version string `json:"version"`
-	Agents  int    `json:"agents"`
+	Agents  int64  `json:"agents"`
 }
 
 type errorBody struct {
@@ -74,8 +82,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet && len(segments) == 1 && segments[0] == "healthz" {
-		// FIXME(okka): report the online agent count once the engine exists.
-		writeJSON(w, http.StatusOK, health{OK: true, Version: s.version, Agents: 0})
+		var agents int64
+		if s.agents != nil {
+			n, err := s.agents.OnlineCount()
+			if err != nil {
+				panic(err)
+			}
+			agents = n
+		}
+		writeJSON(w, http.StatusOK, health{OK: true, Version: s.version, Agents: agents})
 		return
 	}
 	writeJSON(w, http.StatusNotFound, errorBody{Error: "not found"})

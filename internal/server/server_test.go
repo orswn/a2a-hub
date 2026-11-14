@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -48,6 +49,31 @@ func TestHealthz(t *testing.T) {
 		if status != 200 || contentType != "application/json" || body != `{"ok":true,"version":"1.2.3","agents":0}` {
 			t.Errorf("GET %s = %d %q %s", path, status, contentType, body)
 		}
+	}
+}
+
+type counter struct {
+	n   int64
+	err error
+}
+
+func (c counter) OnlineCount() (int64, error) { return c.n, c.err }
+
+func TestHealthzReportsTheOnlineAgentCount(t *testing.T) {
+	ts := httptest.NewServer(New(Options{Version: "1.2.3", Agents: counter{n: 3}}))
+	defer ts.Close()
+	if status, _, body := get(t, ts.URL, http.MethodGet, "/healthz"); status != 200 || body != `{"ok":true,"version":"1.2.3","agents":3}` {
+		t.Errorf("GET /healthz = %d %s", status, body)
+	}
+}
+
+func TestHealthzFailsWhenTheCountFails(t *testing.T) {
+	var logged []string
+	s := New(Options{Agents: counter{err: errors.New("database is locked")}, Log: func(line string) { logged = append(logged, line) }})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != 500 || rec.Body.String() != `{"error":"internal error"}` || len(logged) != 1 || !strings.Contains(logged[0], "database is locked") {
+		t.Errorf("got %d %s, logged %q", rec.Code, rec.Body.String(), logged)
 	}
 }
 
