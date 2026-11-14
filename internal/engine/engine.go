@@ -1,7 +1,8 @@
 // Package engine holds the hub state: agents, tasks, messages, the link mailbox, push configs, and the outboxes.
 //
 // The engine owns one sqlite connection. One mutex serializes every method that reads or writes it. Listeners
-// run after the commit, outside the lock, in commit order.
+// run after the commit, outside the lock, in commit order. Each event goes to the listeners that were
+// registered when its change was committed, as in the TypeScript hub, where listeners run inside the call.
 package engine
 
 import (
@@ -28,14 +29,17 @@ type Options struct {
 
 // Engine is the hub state on one sqlite connection.
 type Engine struct {
-	mu      sync.Mutex
-	conn    *sql.Conn
-	stmts   map[string]*sql.Stmt
-	now     func() int64
-	newID   func(int64) string
-	guard   *pushguard.Guard
-	log     func(string)
-	inTx    bool
+	mu    sync.Mutex
+	conn  *sql.Conn
+	stmts map[string]*sql.Stmt
+	now   func() int64
+	newID func(int64) string
+	guard *pushguard.Guard
+	log   func(string)
+	inTx  bool
+	// staged holds the notices of the open transaction. The commit turns each into a run with the listeners
+	// of that moment.
+	staged  []func() func()
 	pending []func()
 
 	lmu               sync.Mutex
@@ -109,6 +113,7 @@ type dbError struct{ err error }
 func (e *Engine) do(fn func()) (err error) {
 	e.mu.Lock()
 	e.pending = nil
+	e.staged = nil
 	var crash any
 	func() {
 		defer func() {
@@ -168,13 +173,17 @@ func (e *Engine) tx(fn func()) {
 	}
 	e.exec("BEGIN IMMEDIATE")
 	e.inTx = true
-	mark := len(e.pending)
 	committed := false
 	defer func() {
 		e.inTx = false
+		staged := e.staged
+		e.staged = nil
 		if !committed {
-			e.pending = e.pending[:mark]
 			_, _ = e.conn.ExecContext(context.Background(), "ROLLBACK")
+			return
+		}
+		for _, notice := range staged {
+			e.pending = append(e.pending, notice())
 		}
 	}()
 	fn()
@@ -188,7 +197,15 @@ func txValue[T any](e *Engine, fn func() T) T {
 	return out
 }
 
-func (e *Engine) afterCommit(fn func()) { e.pending = append(e.pending, fn) }
+// afterCommit queues a notice. A notice reads its listeners at the commit and returns the run that calls
+// them after the unlock. Outside a transaction the statement is already committed.
+func (e *Engine) afterCommit(notice func() func()) {
+	if e.inTx {
+		e.staged = append(e.staged, notice)
+		return
+	}
+	e.pending = append(e.pending, notice())
+}
 
 // drain runs the queued listeners in commit order. A listener that calls the engine queues its own
 // listeners behind the current ones, and the goroutine that drains runs them too.
@@ -323,39 +340,47 @@ func (e *Engine) OnExternal(listener func()) func() {
 	return func() { e.listeners(func() { e.externalListeners.remove(id) }) }
 }
 
-func (e *Engine) notifyTask(event TaskEvent) {
+func (e *Engine) taskNotice(event TaskEvent) func() {
 	var fns []func(TaskEvent)
 	e.listeners(func() {
 		if set := e.taskListeners[event.TaskID]; set != nil {
 			fns = set.snapshot()
 		}
 	})
-	for _, fn := range fns {
-		e.safely(func() { fn(event) })
+	return func() {
+		for _, fn := range fns {
+			e.safely(func() { fn(event) })
+		}
 	}
 }
 
-func (e *Engine) notifyLink(agentID string, event LinkEvent) {
+func (e *Engine) linkNotice(agentID string, event LinkEvent) func() {
 	var fns []func(string, LinkEvent)
 	e.listeners(func() { fns = e.linkListeners.snapshot() })
-	for _, fn := range fns {
-		e.safely(func() { fn(agentID, event) })
+	return func() {
+		for _, fn := range fns {
+			e.safely(func() { fn(agentID, event) })
+		}
 	}
 }
 
-func (e *Engine) notifyAck(agentID string, upTo int64) {
+func (e *Engine) ackNotice(agentID string, upTo int64) func() {
 	var fns []func(string, int64)
 	e.listeners(func() { fns = e.ackListeners.snapshot() })
-	for _, fn := range fns {
-		e.safely(func() { fn(agentID, upTo) })
+	return func() {
+		for _, fn := range fns {
+			e.safely(func() { fn(agentID, upTo) })
+		}
 	}
 }
 
-func (e *Engine) notify(set *listenerSet[func()]) {
+func (e *Engine) notice(set *listenerSet[func()]) func() {
 	var fns []func()
 	e.listeners(func() { fns = set.snapshot() })
-	for _, fn := range fns {
-		e.safely(fn)
+	return func() {
+		for _, fn := range fns {
+			e.safely(fn)
+		}
 	}
 }
 

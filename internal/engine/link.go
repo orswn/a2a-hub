@@ -19,7 +19,7 @@ func (e *Engine) emit(agentID, eventType string, payload any) *int64 {
 	_, seq := e.run("INSERT INTO link_events (agent_id, type, payload, created_at) VALUES (?, ?, ?, ?)",
 		agentID, eventType, text, e.iso())
 	event := LinkEvent{Seq: seq, Type: eventType, Payload: json.RawMessage(text)}
-	e.afterCommit(func() { e.notifyLink(agentID, event) })
+	e.afterCommit(func() func() { return e.linkNotice(agentID, event) })
 	return &seq
 }
 
@@ -163,7 +163,7 @@ func (e *Engine) Ack(agentID string, upTo any) (int64, error) {
 		if n < math.MaxInt64 {
 			seq = int64(n)
 		}
-		e.afterCommit(func() { e.notifyAck(agentID, seq) })
+		e.afterCommit(func() func() { return e.ackNotice(agentID, seq) })
 		return changes
 	})
 }

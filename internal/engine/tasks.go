@@ -275,10 +275,15 @@ func (e *Engine) emitTask(task *taskRow, response StreamResponse, state State) {
 		}
 	}
 	event := TaskEvent{TaskID: task.ID, AgentID: task.AgentID, State: state, Response: response}
-	e.afterCommit(func() {
-		e.notifyTask(event)
-		if len(configs) > 0 {
-			e.notify(&e.pushListeners)
+	e.afterCommit(func() func() {
+		runTask := e.taskNotice(event)
+		if len(configs) == 0 {
+			return runTask
+		}
+		runPush := e.notice(&e.pushListeners)
+		return func() {
+			runTask()
+			runPush()
 		}
 	})
 }

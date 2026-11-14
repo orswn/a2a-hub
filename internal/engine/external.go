@@ -39,7 +39,7 @@ func (e *Engine) queueExternal(task *taskRow, op string, messageID *string) {
 	at := e.now()
 	e.run(`INSERT INTO external_outbox (agent_id, task_id, context_id, message_id, op, attempts, first_at, next_at)
 			 VALUES (?, ?, ?, ?, ?, 0, ?, ?)`, task.AgentID, task.ID, task.ContextID, messageID, op, at, at)
-	e.afterCommit(func() { e.notify(&e.externalListeners) })
+	e.afterCommit(func() func() { return e.notice(&e.externalListeners) })
 }
 
 // ExternalJobs lists every queued job, oldest first. The gateway keeps one dispatch per context, so it needs
