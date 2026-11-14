@@ -42,6 +42,13 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 - Flags, `HUB_*` env names, defaults, exit codes, and the stdout line `listening <port>` stay the same as the TypeScript hub.
 - The sqlite file stays compatible with the TypeScript hub until the cutover is verified.
 
+## Model-visible text
+
+- Model-visible text is all text that the hub sends to a model at run time: the MCP `instructions`, the `tools/list` names, descriptions, and input schemas, tool result wording, and rendered messages.
+- A snapshot test records the `tools/list` result and the `instructions` with their char counts. The commit that adds `/mcp` adds this test.
+- A change of model-visible text updates the snapshot. Its commit body states the char counts before and after.
+- Keep this text short. Clients send tool schemas with each model request.
+
 ## Tests
 
 - Each bug fix starts with a failing regression test that describes the behavior. Test names carry no issue ids.
