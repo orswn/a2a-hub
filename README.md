@@ -18,7 +18,7 @@ Planned:
 - The A2A JSON-RPC and SSE routes, agent cards, the link API, and the built-in test agents.
 - Push notifications, the gateway to external agents, and the external agent file.
 - The `a2a` host CLI and the MCP endpoint for Claude Code and Codex.
-- A released container image.
+- A released container image. CI builds it now but pushes it only on a `v*` tag.
 
 ## Build
 
@@ -66,12 +66,13 @@ The token file maps a principal name to its kind and the sha256 hex digest of it
 ### Container
 
 ```sh
-make build
-podman build --format docker -f Containerfile -t a2a-hub .
-podman run -v ./data:/data:Z -p 8080:8080 a2a-hub
+podman build --format docker -f Containerfile --build-arg VERSION=0.1.0 -t a2a-hub .
+podman run -v a2a-hub-data:/data -p 8080:8080 a2a-hub
 ```
 
-The image holds only `/a2a-hub` on distroless static. Its health check runs `/a2a-hub healthcheck`. The data directory must be writable by the container user.
+The Containerfile compiles the binary in a Go build stage. The image holds only `/a2a-hub` on distroless static. Its health check runs `/a2a-hub healthcheck`. It runs as `nonroot` (uid 65532). The image `/data` belongs to that user, so a new named or anonymous volume is writable. A bind mount must be writable by the container user.
+
+CI builds the image on every push and pull request. Only a `v*` tag pushes it to `ghcr.io/orswn/a2a-hub`.
 
 ## Test
 

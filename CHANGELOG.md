@@ -10,4 +10,4 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 - `a2a-hub healthcheck` asks the local hub for `/healthz` and exits 0 when it answers 200.
 - `@orswn/a2a-hub-protocol`: the TypeBox source, types, constants, route manifest, and JSON Schema of link protocol 2, unchanged from pimon.
 - The black-box contract suite of the link protocol in `test/`.
-- A distroless container image definition.
+- A distroless container image that compiles the binary in a Go build stage. Its `/data` belongs to the `nonroot` user. CI builds it on every push and pull request and pushes it to `ghcr.io/orswn/a2a-hub` only on a `v*` tag.
