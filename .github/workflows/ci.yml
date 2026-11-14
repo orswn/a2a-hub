@@ -53,7 +53,7 @@ jobs:
       - run: make protocol-test contract RUN=
 
   image:
-    # Builds the image on every push and pull request, so Containerfile errors show before a release.
+    # Builds and runs the image on every push and pull request, so Containerfile errors show before a release.
     # Only a v* tag pushes it.
     needs: [test, vuln, contract]
     runs-on: ubuntu-latest
@@ -69,23 +69,71 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            type=semver,pattern=v{{version}}
+      # The binary reports the version without the v, like make build.
+      - id: version
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT" ;;
+            *) echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Containerfile
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          tags: a2a-hub:smoke
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+      # The anonymous volume of VOLUME /data takes its owner from the image, so a started hub proves that
+      # nonroot can write there.
+      - name: Smoke test the image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run -d --name hub -p 127.0.0.1:8080:8080 a2a-hub:smoke
+          trap 'docker logs hub; docker rm -f hub > /dev/null' EXIT
+          for _ in $(seq 20); do
+            if docker exec hub /a2a-hub healthcheck; then break; fi
+            sleep 1
+          done
+          docker exec hub /a2a-hub healthcheck
+          body="$(curl -fsS http://127.0.0.1:8080/healthz)"
+          echo "$body"
+          test "$body" = "{\"ok\":true,\"version\":\"$VERSION\",\"agents\":0}"
+          docker cp hub:/data - | tar --numeric-owner -tvf - | tee "$RUNNER_TEMP/data.txt"
+          grep -E '^d\S+ 65532/65532 .* data/$' "$RUNNER_TEMP/data.txt"
+          grep -E '^-\S+ 65532/65532 .* data/hub\.sqlite$' "$RUNNER_TEMP/data.txt"
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      # Same builder and inputs as the build step, so this push reuses its cached layers.
+      - id: push
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Containerfile
-          build-args: VERSION=${{ steps.meta.outputs.version }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          push: true
+      - name: Write the image digest to the summary
+        env:
+          IMAGE_ID: ${{ steps.build.outputs.imageid }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "image id: \`$IMAGE_ID\`"
+            if [ -n "$DIGEST" ]; then
+              echo "pushed: \`$TAGS@$DIGEST\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   conformance:
     # FIXME(okka): enable when the A2A routes exist.

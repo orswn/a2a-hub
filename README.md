@@ -72,7 +72,7 @@ podman run -v a2a-hub-data:/data -p 8080:8080 a2a-hub
 
 The Containerfile compiles the binary in a Go build stage. The image holds only `/a2a-hub` on distroless static. Its health check runs `/a2a-hub healthcheck`. It runs as `nonroot` (uid 65532). The image `/data` belongs to that user, so a new named or anonymous volume is writable. A bind mount must be writable by the container user.
 
-CI builds the image on every push and pull request. Only a `v*` tag pushes it to `ghcr.io/orswn/a2a-hub`.
+CI builds the image on every push and pull request, then runs it: `/a2a-hub healthcheck`, the `/healthz` version, and the `65532` owner of `/data` and `hub.sqlite`. Only a `v*` tag pushes it to `ghcr.io/orswn/a2a-hub`, with the git tag as the image tag, such as `ghcr.io/orswn/a2a-hub:v1.0.0`. The job summary shows the pushed digest.
 
 ## Test
 
