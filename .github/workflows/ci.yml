@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make fmt-check RUN=
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+      - run: go test -race ./...
+
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make vuln RUN=
+
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            protocol/package-lock.json
+            test/package-lock.json
+      - run: make protocol-test contract RUN=
+
+  conformance:
+    # FIXME(okka): enable when the A2A routes exist.
+    if: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HUB_URL: http://127.0.0.1:18080
+      TCK_COMMIT: 70f6f73c30208e80c889141907e094899e6e9f05
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make build RUN=
+      - name: Start the hub
+        run: |
+          bin/a2a-hub --test-agents --listen 127.0.0.1:18080 --data "$RUNNER_TEMP/hub" > "$RUNNER_TEMP/hub.log" 2>&1 &
+          for _ in $(seq 1 50); do bin/a2a-hub healthcheck --listen 127.0.0.1:18080 && exit 0; sleep 0.2; done
+          cat "$RUNNER_TEMP/hub.log"
+          exit 1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.13"
+      - name: Run a2a-tck
+        run: |
+          git init -q "$RUNNER_TEMP/tck"
+          cd "$RUNNER_TEMP/tck"
+          git remote add origin https://github.com/a2aproject/a2a-tck.git
+          git fetch -q --depth 1 origin "$TCK_COMMIT"
+          git checkout -q FETCH_HEAD
+          uv sync --frozen
+          # The gate below decides: SHOULD and MAY gaps do not fail the job.
+          uv run python run_tck.py --sut-host "$HUB_URL/a2a/tck" --transport jsonrpc || true
+      - run: python3 scripts/tck-gate.py "$RUNNER_TEMP/tck/reports"
+      - run: uv run scripts/hub-python-client.py "$HUB_URL"
+      - if: failure()
+        run: cat "$RUNNER_TEMP/hub.log"
