@@ -27,10 +27,23 @@ func get(t *testing.T, base, method, path string) (int, string, string) {
 	return res.StatusCode, res.Header.Get("Content-Type"), string(body)
 }
 
+// The TypeScript hub parses the target with new URL(): "//healthz" names the host "healthz" and gives 404,
+// and "/x/../healthz" loses its dot segments and gives 200. This hub only drops empty segments. The README
+// lists the difference.
+func TestPathNormalizationDiffersFromTheTypeScriptHub(t *testing.T) {
+	ts := httptest.NewServer(New(Options{Version: "1.2.3"}))
+	defer ts.Close()
+	for path, want := range map[string]int{"//healthz": 200, "/x/../healthz": 404, "/./healthz": 404} {
+		if status, _, _ := get(t, ts.URL, http.MethodGet, path); status != want {
+			t.Errorf("GET %s = %d, want %d", path, status, want)
+		}
+	}
+}
+
 func TestHealthz(t *testing.T) {
 	ts := httptest.NewServer(New(Options{Version: "1.2.3"}))
 	defer ts.Close()
-	for _, path := range []string{"/healthz", "/healthz/", "//healthz", "/healthz?x=1", "/%68ealthz"} {
+	for _, path := range []string{"/healthz", "/healthz/", "/healthz?x=1", "/%68ealthz"} {
 		status, contentType, body := get(t, ts.URL, http.MethodGet, path)
 		if status != 200 || contentType != "application/json" || body != `{"ok":true,"version":"1.2.3","agents":0}` {
 			t.Errorf("GET %s = %d %q %s", path, status, contentType, body)

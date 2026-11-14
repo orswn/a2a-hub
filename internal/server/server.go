@@ -81,8 +81,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotFound, errorBody{Error: "not found"})
 }
 
-// pathSegments splits a path into its non-empty decoded segments, like the TypeScript hub. false means a
-// malformed percent escape.
+// pathSegments splits a path into its non-empty decoded segments. false means a malformed percent escape.
+// Dot segments stay, and a leading "//" is not an authority: the TypeScript hub differs in both.
 func pathSegments(escaped string) ([]string, bool) {
 	var segments []string
 	for _, part := range strings.Split(escaped, "/") {
