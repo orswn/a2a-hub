@@ -1,6 +1,7 @@
 # Local runs take Go and Node from mise.toml. CI sets RUN= and installs the tools itself.
 RUN ?= mise exec --
 GOLANGCI_LINT ?= mise exec aqua:golangci/golangci-lint@2.15.0 -- golangci-lint
+HADOLINT ?= mise exec aqua:hadolint/hadolint@2.14.0 -- hadolint
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 
 .PHONY: verify fmt-check vet lint go-test protocol-test contract build bin/a2a-hub vuln containerfile-lint clean
@@ -42,7 +43,7 @@ vuln:
 	$(RUN) go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 containerfile-lint:
-	hadolint Containerfile
+	$(HADOLINT) Containerfile
 
 clean:
 	rm -rf bin
