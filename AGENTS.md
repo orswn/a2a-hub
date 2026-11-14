@@ -1,0 +1,58 @@
+# a2a-hub
+
+The A2A 1.0 hub for agent harness sessions (pi, Claude Code, Codex) and external A2A agents. One Go module, `github.com/orswn/a2a-hub`, with one static binary. The repository root `package.json` is the npm package `@orswn/a2a-hub-protocol`.
+
+## Commands
+
+- `make verify`: gofmt check, `go vet`, `golangci-lint`, `go test -race`, the protocol package tests, and the contract suite against a binary built from the current sources. Run it before each commit.
+- `make build`: the static binary `bin/a2a-hub`. The version comes from `git describe`.
+- `mise exec -- go test ./...`: the Go unit tests only.
+- `npm --prefix protocol run schema`: write `protocol/schema/hub-protocol-v<N>.json` after a change in `protocol/src`.
+- `npm --prefix protocol test`: schema drift check, type check, and protocol tests.
+- `CONTRACT_PENDING=1 npm --prefix test run contract`: the contract suite against `bin/a2a-hub`, or against env `HUB_BIN`.
+- `make vuln`: `govulncheck`.
+- `make containerfile-lint`: `hadolint` on the `Containerfile`.
+
+Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools only through `mise exec` or as `go tool` directives, never globally.
+
+## Layout
+
+- `cmd/a2a-hub/`: the server. Flags and env, signals, `listening <port>`, and the `healthcheck` subcommand.
+- `internal/config/`: flags, `HUB_*` env, defaults.
+- `internal/auth/`: token file and bearer lookup.
+- `internal/store/`: sqlite open, schema, migrations, table rebuild.
+- `internal/server/`: the HTTP front.
+- `protocol/`: TypeBox source, constants, route manifest, generator, and the committed JSON Schema of the link protocol.
+- `test/`: TypeScript workspace with the black-box contract suite.
+- `scripts/`: `tck-gate.py` and `hub-python-client.py` for the conformance job.
+
+## Code rules
+
+- `CGO_ENABLED=0`. Every dependency must build without cgo.
+- Comments only for a non-obvious why: a hidden constraint, an invariant, a workaround. One or two lines.
+- Deferred work gets a `FIXME(okka): ...` comment.
+- Go unit tests live next to the package. Inject a clock and an id generator where a test needs fixed times or ids.
+- Store migrations are append-only. Never edit a released migration. A migration that drops or renames a table that another table references sets `RebuildsTables`.
+
+## Wire parity
+
+- The committed JSON Schema (`protocol/schema/hub-protocol-v<N>.json`) and the contract suite (`test/contract/`) are the spec of the link protocol.
+- A wire change needs a protocol bump: a new `HUB_PROTOCOL`, a new schema file, and a contract suite for it. The old file stays while the hub accepts its clients.
+- Never edit a schema file by hand. Change `protocol/src` and run `npm --prefix protocol run schema`.
+- Flags, `HUB_*` env names, defaults, exit codes, and the stdout line `listening <port>` stay the same as the TypeScript hub.
+- The sqlite file stays compatible with the TypeScript hub until the cutover is verified.
+
+## Tests
+
+- Each bug fix starts with a failing regression test that describes the behavior. Test names carry no issue ids.
+- No test calls a real LLM.
+- No test may reach the human: no desktop or phone notification, terminal multiplexer, `sudo`, or live agent session.
+- Each test owns its temp dirs (`t.TempDir()`, `tempDir()`). No test writes outside them.
+- Tests in `test/` are black-box: they talk to the hub binary only over HTTP and SSE. They import no Go code and no value from `protocol/src`.
+
+## Releases
+
+- SemVer. `CHANGELOG.md` headings are `## [x.y.z] - YYYY-MM-DD`.
+- A release is one `chore(release): vX.Y.Z` commit and a signed `vX.Y.Z` tag. The commit updates `CHANGELOG.md` and the version in the root `package.json`.
+- The binary takes its version from the tag through `-ldflags "-X main.version=<version>"`.
+- Commit headers follow Conventional Commits. Bodies follow the Linux kernel style.
