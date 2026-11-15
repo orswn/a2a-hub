@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -367,5 +368,26 @@ func TestTheShimLogsAHeaderFailureOnce(t *testing.T) {
 	}
 	if lines := strings.Count(f.errOut.String(), "\n"); lines != 1 {
 		t.Fatalf("stderr = %q", f.errOut.String())
+	}
+}
+
+func TestAGoInstallBuildReportsItsModuleVersion(t *testing.T) {
+	build := func(v string) *debug.BuildInfo { return &debug.BuildInfo{Main: debug.Module{Version: v}} }
+	cases := []struct {
+		set  string
+		info *debug.BuildInfo
+		ok   bool
+		want string
+	}{
+		{"0.0.0-dev", build("v1.3.1"), true, "1.3.1"},
+		{"1.3.1", build("v9.9.9"), true, "1.3.1"},
+		{"0.0.0-dev", build("(devel)"), true, "0.0.0-dev"},
+		{"0.0.0-dev", build(""), true, "0.0.0-dev"},
+		{"0.0.0-dev", nil, false, "0.0.0-dev"},
+	}
+	for _, c := range cases {
+		if got := moduleVersion(c.set, c.info, c.ok); got != c.want {
+			t.Errorf("moduleVersion(%q, %v, %v) = %q, want %q", c.set, c.info, c.ok, got, c.want)
+		}
 	}
 }

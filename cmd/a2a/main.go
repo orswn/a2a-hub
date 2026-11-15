@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -67,7 +68,17 @@ type sys struct {
 	self string
 }
 
+// moduleVersion gives the module version of a go install build when no -ldflags version was set.
+func moduleVersion(set string, info *debug.BuildInfo, ok bool) string {
+	if set != "0.0.0-dev" || !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return set
+	}
+	return strings.TrimPrefix(info.Main.Version, "v")
+}
+
 func main() {
+	info, ok := debug.ReadBuildInfo()
+	version = moduleVersion(version, info, ok)
 	home, _ := os.UserHomeDir()
 	cwd, _ := os.Getwd()
 	host, _ := os.Hostname()

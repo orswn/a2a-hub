@@ -4,6 +4,11 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 ## [Unreleased]
 
+### Fixed
+
+- A `send` with `wait` no longer answers "completed with no reply text" when the reply commits together with the end of its task between the two reads of a wait round.
+- `a2a version` prints the module version from the build info, for example of a `go install` build, instead of `0.0.0-dev`.
+
 ## [1.3.0] - 2026-11-15
 
 ### Added
