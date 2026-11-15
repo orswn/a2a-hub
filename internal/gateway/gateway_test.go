@@ -676,3 +676,21 @@ func TestOutboundTextAndParseSkillsMatchTheTypeScriptHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookFollowsAReload(t *testing.T) {
+	h := setup(t)
+	g := New(h.engine, Options{Log: h.log})
+	agent := external.Agent{ID: "ext", Name: "ext", URL: "http://127.0.0.1:1/", Token: "t"}
+	g.Configure([]external.Agent{agent})
+	if hook := g.Webhook("ext"); hook != nil {
+		t.Errorf("webhook before = %+v", hook)
+	}
+	agent.Webhook = &external.Webhook{URL: "http://127.0.0.1:2/webhooks/a2a-hub", Secret: "s"}
+	g.Configure([]external.Agent{agent})
+	if hook := g.Webhook("ext"); hook == nil || *hook != *agent.Webhook {
+		t.Errorf("webhook after reload = %+v", hook)
+	}
+	if hook := g.Webhook("other"); hook != nil {
+		t.Errorf("unknown agent = %+v", hook)
+	}
+}

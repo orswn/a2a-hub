@@ -201,6 +201,17 @@ func (g *Gateway) Card(agentID string) *a2aapi.ExternalCard {
 	return card
 }
 
+// Webhook gives the webhook of a configured agent. nil means none, or not configured.
+func (g *Gateway) Webhook(agentID string) *external.Webhook {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if agent := g.agents[agentID]; agent != nil && agent.Webhook != nil {
+		copied := *agent.Webhook
+		return &copied
+	}
+	return nil
+}
+
 // Configure loads or reloads the agent list. A removed agent goes offline and its running dispatches fail.
 func (g *Gateway) Configure(agents []external.Agent) {
 	next := map[string]*external.Agent{}

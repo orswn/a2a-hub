@@ -119,3 +119,41 @@ func TestFindsTheCardNextToTheJSONRPCURL(t *testing.T) {
 		}
 	}
 }
+
+func TestReadsTheOptionalWebhook(t *testing.T) {
+	agents, err := parseValue(t, entry{"hermes": entry{"url": "http://hermes:9900/", "token": "t",
+		"webhook": entry{"url": "http://hermes:8644/webhooks/a2a-hub", "secret": "s3cret"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Webhook{URL: "http://hermes:8644/webhooks/a2a-hub", Secret: "s3cret"}
+	if !reflect.DeepEqual(agents[0].Webhook, want) {
+		t.Errorf("webhook = %+v", agents[0].Webhook)
+	}
+	plain, err := parseValue(t, entry{"hermes": entry{"url": "http://hermes:9900/", "token": "t"}})
+	if err != nil || plain[0].Webhook != nil {
+		t.Errorf("no webhook: %v %+v", err, plain)
+	}
+}
+
+func TestRefusesABadWebhookWithoutTheSecretInTheError(t *testing.T) {
+	cases := []struct {
+		webhook any
+		want    string
+	}{
+		{"http://h/", "webhook must be an object"},
+		{entry{"secret": "s3cret"}, "webhook url must be"},
+		{entry{"url": "ftp://h/", "secret": "s3cret"}, "webhook url must use http or https"},
+		{entry{"url": "http://h/"}, "webhook secret must be"},
+		{entry{"url": "http://h/", "secret": "   "}, "webhook secret must be"},
+		{entry{"url": "http://h/", "secret": "s3cret", "events": []any{}}, "unknown webhook field events"},
+	}
+	for _, c := range cases {
+		_, err := parseValue(t, entry{"h": entry{"url": "http://h/", "token": "t", "webhook": c.webhook}})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%v: got %v, want %q", c.webhook, err, c.want)
+		} else if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("secret in %q", err)
+		}
+	}
+}

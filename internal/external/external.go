@@ -37,6 +37,15 @@ type Agent struct {
 	Retry time.Duration
 	// Offline is how long the hub retries an agent it cannot connect to before the task fails.
 	Offline time.Duration
+	// Webhook is where the hub posts the replies to the MCP sends of the agent. nil means inbox only.
+	Webhook *Webhook
+}
+
+// Webhook is a signed webhook route of an external agent.
+type Webhook struct {
+	URL string
+	// Secret is the HMAC key, used as its UTF-8 text.
+	Secret string
 }
 
 // Defaults of the optional fields, in milliseconds as in the file.
@@ -58,7 +67,7 @@ const agentIDSource = `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
 
 func known(field string) bool {
 	switch field {
-	case "name", "url", "token", "description":
+	case "name", "url", "token", "description", "webhook":
 		return true
 	}
 	_, ok := Defaults[field]
@@ -166,9 +175,42 @@ func Parse(source []byte) ([]Agent, error) {
 				return nil, err
 			}
 		}
+		if raw, present := entry.Get("webhook"); present {
+			if agent.Webhook, err = webhook(raw, id); err != nil {
+				return nil, err
+			}
+		}
 		agents = append(agents, agent)
 	}
 	return agents, nil
+}
+
+func webhook(raw any, id string) (*Webhook, error) {
+	spec, ok := raw.(*jsonx.Object)
+	if !ok {
+		return nil, fmt.Errorf("external agent %s: webhook must be an object", id)
+	}
+	for _, field := range spec.Keys() {
+		if field != "url" && field != "secret" {
+			return nil, fmt.Errorf("external agent %s: unknown webhook field %s", id, field)
+		}
+	}
+	rawURL, _, err := text(spec, id, "url", true)
+	if err != nil {
+		return nil, fmt.Errorf("external agent %s: webhook url must be a non-empty string", id)
+	}
+	parsed, err := pushguard.ParseURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("external agent %s: webhook url is not a valid URL", id)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("external agent %s: webhook url must use http or https", id)
+	}
+	secret, isString := spec.Value("secret").(string)
+	if !isString || strings.TrimFunc(secret, isJSSpace) == "" {
+		return nil, fmt.Errorf("external agent %s: webhook secret must be a non-empty string", id)
+	}
+	return &Webhook{URL: rawURL, Secret: secret}, nil
 }
 
 // Load reads an external agents file. An empty path gives no agents.
