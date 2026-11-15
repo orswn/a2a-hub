@@ -156,7 +156,7 @@ describe("hub link contract for protocol 2 clients", () => {
 	it("sends a task with the protocol 2 header and URI and answers under that URI", async () => {
 		const sent = await rpc(alpha, beta, "SendMessage", sendParams("review", { kind: "task", expectReply: true }));
 		expect(sent.extensions).toBe(LEGACY.busUri);
-		const task = sent.result["task"] as { id: string };
+		const task = sent.result["task"] as { id: string; contextId: string };
 		const event = await next(betaLink, "message", (data) => data["taskId"] === task.id);
 		expect(event.data).toMatchObject({ from: { agent: alpha, name: "alpha", kind: "session" }, expectReply: true });
 		expect((await ok("GET", `/link/${beta}/owed`))["tasks"]).toEqual([expect.objectContaining({ taskId: task.id })]);
@@ -174,6 +174,28 @@ describe("hub link contract for protocol 2 clients", () => {
 		expect(inbox).toContainEqual(
 			expect.objectContaining({ messageId: done.data["messageId"], from: expect.objectContaining({ kind: "session" }) }),
 		);
+
+		const messageId = String(done.data["messageId"]);
+		expect(await ok("GET", `/link/${alpha}/message/${messageId.slice(0, 12)}`)).toMatchObject({
+			messageId,
+			text: "done",
+			from: { agent: beta, kind: "session" },
+		});
+		expect(await ok("POST", `/link/${alpha}/read`, { ids: [messageId] })).toEqual({ read: 1 });
+		const thread = await ok("GET", `/link/${alpha}/thread/${task.contextId.slice(0, 12)}`);
+		const items = thread["messages"] as { text: string; from: { kind: string } }[];
+		expect(items.map((item) => item.text)).toEqual(expect.arrayContaining(["review", "done"]));
+		expect(new Set(items.map((item) => item.from.kind))).toEqual(new Set(["session"]));
+	});
+
+	it("cancels a task through JSON-RPC with the protocol 2 header", async () => {
+		const sent = await rpc(alpha, beta, "SendMessage", sendParams("cancel me", { kind: "task" }));
+		const task = sent.result["task"] as { id: string };
+		await next(betaLink, "message", (data) => data["taskId"] === task.id);
+		const canceled = await rpc(alpha, beta, "CancelTask", { id: task.id });
+		expect(canceled.result).toMatchObject({ id: task.id, status: { state: "TASK_STATE_CANCELED" } });
+		await next(betaLink, "cancel", (data) => data["taskId"] === task.id);
+		await next(alphaLink, "update", (data) => data["taskId"] === task.id && data["state"] === "canceled");
 	});
 
 	it("stamps the delivery state under the protocol 2 URI", async () => {
