@@ -140,12 +140,25 @@ func (s *Server) claim(n engine.InboxNotice) bool {
 	return false
 }
 
+// betweenWaitReads runs between the two reads of each await round. Tests commit a reply there.
+var betweenWaitReads = func() {}
+
 // await waits for the first reply to a send and gives its text for the tool result.
 func (s *Server) await(ctx context.Context, w *waiter, taskIDs []string, wait time.Duration) string {
 	e := s.opts.Engine
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	for {
+		// The task state comes first: a reply commits with the state change, so a state read after the reply read
+		// could see a task end whose reply the reply read missed.
+		ended, endState := "", engine.State("")
+		for _, id := range taskIDs {
+			if state, err := e.TaskState(id); err == nil && a2aapi.EndsWait(state) {
+				ended, endState = id, state
+				break
+			}
+		}
+		betweenWaitReads()
 		item, err := e.FirstReply(w.agent, w.messageID, taskIDs)
 		if err != nil {
 			return s.errorText(err)
@@ -156,10 +169,8 @@ func (s *Server) await(ctx context.Context, w *waiter, taskIDs []string, wait ti
 			}
 			return "First reply:\n" + formatItem(*item)
 		}
-		for _, id := range taskIDs {
-			if state, err := e.TaskState(id); err == nil && a2aapi.EndsWait(state) {
-				return "Task " + id + " is " + engine.LinkState(state) + " with no reply text."
-			}
+		if ended != "" {
+			return "Task " + ended + " is " + engine.LinkState(endState) + " with no reply text."
 		}
 		select {
 		case <-w.wake:

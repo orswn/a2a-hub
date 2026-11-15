@@ -140,6 +140,22 @@ func TestSendWordingPinsEachDeliveryState(t *testing.T) {
 	stream.close()
 }
 
+func TestSendWaitGivesAReplyThatCommitsWithTheEndOfItsTask(t *testing.T) {
+	h, c := hermesSetup(t, nil)
+	done := false
+	betweenWaitReads = func() {
+		owed, _ := h.e.Owed("p1")
+		if done || len(owed.Tasks) != 1 {
+			return
+		}
+		done = true
+		_, _ = h.e.LinkUpdate("p1", owed.Tasks[0].TaskID, jsonx.NewObject("state", "completed", "text", "done: 42"))
+	}
+	t.Cleanup(func() { betweenWaitReads = func() {} })
+	text := c.ok("send", args("target", "p1", "text", "compute", "kind", "task", "wait", 10))
+	mustContain(t, "wait", text, "\n\nFirst reply:\nmessageId=", "kind=result", "\ndone: 42")
+}
+
 func TestSendWaitReturnsTheFirstReplyAndMarksItRead(t *testing.T) {
 	h, c := hermesSetup(t, nil)
 	go func() {
