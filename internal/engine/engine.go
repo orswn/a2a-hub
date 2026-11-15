@@ -48,6 +48,7 @@ type Engine struct {
 	ackListeners      listenerSet[func(string, int64)]
 	pushListeners     listenerSet[func()]
 	externalListeners listenerSet[func()]
+	inboxListeners    listenerSet[func(InboxNotice)]
 
 	qmu      sync.Mutex
 	queue    []func()

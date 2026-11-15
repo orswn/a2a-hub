@@ -330,6 +330,11 @@ func (e *Engine) insertInbox(agentID string, sender Sender, caller Caller, conte
 		replyTo = &meta.ReplyTo
 	}
 	messageID, _ := message.String("messageId")
+	notice := InboxNotice{AgentID: agentID, MessageID: messageID, ContextID: contextID, ReplyTo: meta.ReplyTo, Kind: meta.Kind, Wake: meta.Wake}
+	if taskID != nil {
+		notice.TaskID = *taskID
+	}
+	e.afterCommit(func() func() { return e.inboxNotice(notice) })
 	e.run(`INSERT INTO messages (id, agent_id, sender_agent, sender_principal, sender_name, sender_kind, context_id, task_id, kind, meta, message, created_at, reply_to)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		messageID, agentID, senderAgent, caller.Principal.Name, sender.Name, sender.Kind, contextID, taskID,
@@ -356,6 +361,11 @@ type SendInput struct {
 	// registered inside the call, so it misses no change that another caller commits after the send, and it
 	// gets none of the send's own events. SendResult.Unwatch removes it. The listener rules of OnTask apply.
 	Watch func(TaskEvent)
+	// MCP marks a send through the MCP endpoint. A reply to such a send of an external agent, or a message in
+	// its thread, stays in the inbox of that agent and is not dispatched to it.
+	MCP bool
+	// Origin is stored with an MCP send.
+	Origin *jsonx.Object
 }
 
 // SendResult holds the task, or for a message without a task the "stored" reply.
@@ -404,6 +414,10 @@ func (e *Engine) send(input SendInput) *SendResult {
 		throw(ReasonInvalid, "message.messageId is required")
 	}
 	meta := parseBusMetadata(incoming.Value("metadata"))
+	meta.MCP = input.MCP
+	if input.MCP {
+		meta.Origin = input.Origin
+	}
 	if input.PushConfig != nil {
 		e.validatePushURL(input.PushConfig.URL)
 	}
@@ -421,6 +435,9 @@ func (e *Engine) send(input SendInput) *SendResult {
 		} else {
 			followUp = e.openTaskInContext(agent, caller, incomingContext)
 		}
+		// An external agent reads the replies to its MCP sends in its inbox, so they are not dispatched to it.
+		inboxOnly := followUp == nil && agent.Kind == KindExternal &&
+			e.mcpThread(agent.ID, incomingContext, meta.ReplyTo) != nil
 		switch {
 		case followUp != nil:
 			task = followUp
@@ -448,7 +465,7 @@ func (e *Engine) send(input SendInput) *SendResult {
 				copied.State = StateWorking
 				task = &copied
 			}
-		case taskKinds[meta.Kind]:
+		case taskKinds[meta.Kind] && !inboxOnly:
 			at := e.iso()
 			id := e.NewID()
 			contextID = incomingContext
@@ -467,7 +484,7 @@ func (e *Engine) send(input SendInput) *SendResult {
 			task = e.taskRow(id)
 			created = true
 		default:
-			if agent.Kind == KindExternal {
+			if agent.Kind == KindExternal && !inboxOnly {
 				throw(ReasonInvalid, "external agents take only task, question, or correction messages")
 			}
 			contextID = incomingContext

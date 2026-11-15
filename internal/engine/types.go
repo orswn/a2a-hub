@@ -346,6 +346,10 @@ type Meta struct {
 	ReplyTo      string  `json:"replyTo,omitempty"`
 	// Data is any parsed JSON value. JSON null stays, a nil means no data.
 	Data any `json:"data,omitempty"`
+	// MCP marks a message sent through the MCP endpoint. Bus metadata cannot set it.
+	MCP bool `json:"mcp,omitempty"`
+	// Origin is the chat that an MCP send of an external agent came from. Bus metadata cannot set it.
+	Origin *jsonx.Object `json:"origin,omitempty"`
 }
 
 // ParseBusMetadata reads the bus extension entry of message metadata and fills the defaults.
