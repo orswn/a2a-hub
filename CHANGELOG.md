@@ -4,6 +4,8 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-15
+
 ### Added
 
 - Link protocol 3 and `hub-protocol-v3.json`. A session of any harness registers as kind `session` with the label `harness`, such as `pi`, `claude-code`, or `codex`. A protocol 3 register without `labels.harness` gets `400`, unless the stored labels already have it.
