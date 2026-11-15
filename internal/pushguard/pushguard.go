@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/orswn/a2a-hub/internal/config"
 )
@@ -141,6 +142,34 @@ func (g *Guard) CheckSend(ctx context.Context, rawURL string) string {
 		}
 	}
 	return ""
+}
+
+// DialContext dials like base, but refuses a connection to an address that the guard does not allow. The check
+// runs on the address of the socket, so a DNS change between CheckSend and the dial cannot reach a denied
+// address. A host name on the allow list skips the check, as in CheckSend.
+func (g *Guard) DialContext(base *net.Dialer) func(ctx context.Context, network, address string) (net.Conn, error) {
+	guarded := *base
+	guarded.Control = func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		ip, err := netip.ParseAddr(host)
+		if err != nil || !g.AddressAllowed(ip) {
+			return fmt.Errorf("push address %s is not allowed", host)
+		}
+		return nil
+	}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+		if g != nil && g.hosts[strings.TrimSuffix(strings.ToLower(host), ".")] {
+			return base.DialContext(ctx, network, address)
+		}
+		return guarded.DialContext(ctx, network, address)
+	}
 }
 
 func hostAddr(host string) (netip.Addr, bool) {

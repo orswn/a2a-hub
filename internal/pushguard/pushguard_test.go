@@ -3,6 +3,8 @@ package pushguard
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"net/netip"
 	"regexp"
 	"testing"
@@ -171,5 +173,43 @@ func TestParseURLGivesTheWHATWGHost(t *testing.T) {
 	}
 	if u, err := ParseURL("ftp://files.example/x"); err != nil || u.Scheme != "ftp" {
 		t.Errorf("ftp = %+v, %v", u, err)
+	}
+}
+
+func TestDialChecksTheAddressOfTheSocket(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(listener.Addr().String())
+	dial := func(g *Guard, host string) error {
+		conn, err := g.DialContext(&net.Dialer{})(context.Background(), "tcp4", net.JoinHostPort(host, port))
+		if err == nil {
+			_ = conn.Close()
+		}
+		return err
+	}
+	// The resolver of CheckSend says the host is public; the socket still goes to loopback.
+	rebound := mustGuard(t, nil, table(map[string][]string{"localhost": {"93.184.216.34"}}))
+	if refused := rebound.CheckSend(context.Background(), "http://localhost:"+port+"/hook"); refused != "" {
+		t.Fatalf("CheckSend = %q", refused)
+	}
+	match(t, "dial localhost", fmt.Sprint(dial(rebound, "localhost")), `push address 127\.0\.0\.1 is not allowed`)
+	match(t, "dial 127.0.0.1", fmt.Sprint(dial(rebound, "127.0.0.1")), `push address 127\.0\.0\.1 is not allowed`)
+	if err := dial(mustGuard(t, []string{"127.0.0.0/8"}, nil), "localhost"); err != nil {
+		t.Errorf("allowed CIDR: %v", err)
+	}
+	if err := dial(mustGuard(t, []string{"localhost"}, nil), "localhost"); err != nil {
+		t.Errorf("allowed host name: %v", err)
 	}
 }
