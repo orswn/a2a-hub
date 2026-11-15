@@ -47,6 +47,9 @@ type Guard struct {
 	resolve Resolver
 }
 
+// TestAgentAllow is the loopback that test mode adds to the allow list, so the TCK can reach its own webhook.
+var TestAgentAllow = []string{"127.0.0.0/8", "::1"}
+
 // New makes a guard from allow list entries: host names, addresses, and CIDRs. A nil resolver uses the system.
 func New(allow []string, resolve Resolver) (*Guard, error) {
 	entries, err := config.ParsePushAllow(strings.Join(allow, ","))

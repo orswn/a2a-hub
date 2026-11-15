@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Schema from "typebox/schema";
-import { afterAll, beforeAll, describe, expect, type TestFunction, it as vitestIt } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	BUS_URI,
 	HOST_TOKEN,
@@ -43,27 +43,6 @@ const document = JSON.parse(readFileSync(SCHEMA_FILE, "utf8")) as ProtocolDocume
 const routes = document["x-routes"];
 const events = document["x-events"];
 const BODY_LIMIT = 1024 * 1024;
-
-/**
- * Env `CONTRACT_PENDING=1` expects the cases that need routes that the Go hub does not serve yet to fail, and
- * skips the coverage check. A pending case that passes fails the run, so remove it from the list. Remove the
- * env and this list once the link and A2A routes exist.
- */
-const PENDING = process.env["CONTRACT_PENDING"] === "1";
-const PENDING_CASES = new Set([
-	"registers agents and a child, and lists them",
-	"stores state, status, and topics",
-	"delivers a task, its update, and the inbox views",
-	"cancels a task through A2A and tells both sides",
-	"stamps the delivery state on a send",
-	"closes a child, replaces an older stream, acks, and goes offline",
-	"gives the listed error bodies",
-]);
-const registered = new Set<string>();
-function it(name: string, fn: TestFunction): void {
-	registered.add(name);
-	(PENDING && PENDING_CASES.has(name) ? vitestIt.fails : vitestIt)(name, fn);
-}
 
 /**
  * Sets `additionalProperties: false` on each object schema that does not set it and has no `patternProperties`.
@@ -154,7 +133,7 @@ describe("hub link contract", () => {
 				].filter((name) => !seen.errorSchemas.has(name)),
 				statuses: [400, 401, 403, 404, 409, 413, 426].filter((status) => !seen.statuses.has(status)),
 			};
-			if (!PENDING) expect(missing).toEqual({ routes: [], events: [], errorSchemas: [], statuses: [] });
+			expect(missing).toEqual({ routes: [], events: [], errorSchemas: [], statuses: [] });
 		} finally {
 			for (const link of links) await link.close();
 			await hub?.stop();
@@ -435,8 +414,4 @@ describe("hub link contract", () => {
 		const threads = await fails(409, "GET", `/link/${beta}/thread/twin-ctx-`);
 		expect((threads["candidates"] as unknown[]).length).toBe(2);
 	});
-});
-
-vitestIt("lists only registered cases as pending", () => {
-	expect([...PENDING_CASES].filter((name) => !registered.has(name))).toEqual([]);
 });

@@ -11,16 +11,26 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/orswn/a2a-hub/internal/a2aapi"
 	"github.com/orswn/a2a-hub/internal/auth"
 	"github.com/orswn/a2a-hub/internal/config"
 	"github.com/orswn/a2a-hub/internal/engine"
+	"github.com/orswn/a2a-hub/internal/link"
 	"github.com/orswn/a2a-hub/internal/pushguard"
 	"github.com/orswn/a2a-hub/internal/server"
 	"github.com/orswn/a2a-hub/internal/store"
+	"github.com/orswn/a2a-hub/internal/testagents"
+)
+
+const (
+	// keepAliveTimeout closes an idle keep-alive connection, as the TypeScript hub does.
+	keepAliveTimeout = 65 * time.Second
+	sweepInterval    = 24 * time.Hour
 )
 
 // version is set at build time with -ldflags "-X main.version=<version>".
@@ -68,7 +78,11 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	guard, err := pushguard.New(cfg.PushAllow, pushguard.DefaultResolver)
+	allow := cfg.PushAllow
+	if cfg.TestAgents {
+		allow = append(slices.Clone(allow), pushguard.TestAgentAllow...)
+	}
+	guard, err := pushguard.New(allow, pushguard.DefaultResolver)
 	if err != nil {
 		return err
 	}
@@ -77,6 +91,30 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 		return err
 	}
 	defer func() { _ = hubEngine.Close() }()
+	var builtins map[string]a2aapi.Builtin
+	if cfg.TestAgents {
+		if builtins, err = testagents.Install(hubEngine, log); err != nil {
+			return err
+		}
+	}
+	links := link.New(hubEngine, link.Options{PresenceGrace: cfg.PresenceGrace, Heartbeat: cfg.Heartbeat, Log: log})
+	defer links.Stop()
+	agents, err := hubEngine.ListAgents(false)
+	if err != nil {
+		return err
+	}
+	var online []string
+	for _, agent := range agents {
+		if agent.Kind == "pi" {
+			online = append(online, agent.ID)
+		}
+	}
+	links.Start(online)
+	if _, err := hubEngine.Sweep(); err != nil {
+		return err
+	}
+	stopSweep := sweepEvery(hubEngine, sweepInterval, log)
+	defer stopSweep()
 
 	network := "tcp"
 	if addr, err := netip.ParseAddr(cfg.Host); err == nil && addr.Is4() {
@@ -86,8 +124,12 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	if err != nil {
 		return err
 	}
-	hub := server.New(server.Options{Version: version, Tokens: tokens, Agents: hubEngine, Log: log})
-	httpServer := &http.Server{Handler: hub, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 5 * time.Second}
+	hub := server.New(server.Options{
+		Version: version, Tokens: tokens, Engine: hubEngine, Link: links, Builtins: builtins,
+		PublicURL: cfg.PublicURL, Listen: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
+		Heartbeat: cfg.Heartbeat, Log: log,
+	})
+	httpServer := newHTTPServer(hub)
 	served := make(chan error, 1)
 	go func() { served <- httpServer.Serve(listener) }()
 	_, _ = fmt.Fprintf(stdout, "listening %d\n", listener.Addr().(*net.TCPAddr).Port)
@@ -110,6 +152,31 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 			}
 			return nil
 		}
+	}
+}
+
+func newHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{Handler: handler, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: keepAliveTimeout}
+}
+
+func sweepEvery(e *engine.Engine, interval time.Duration, log func(string)) func() {
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := e.Sweep(); err != nil {
+					log("sweep failed: " + err.Error())
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		ticker.Stop()
+		close(done)
 	}
 }
 

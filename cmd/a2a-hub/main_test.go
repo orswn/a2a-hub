@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -115,32 +114,10 @@ func TestServesHealthzAndStopsOnSignals(t *testing.T) {
 	}
 }
 
-// Node closes an idle keep-alive connection after 5 seconds. Without a limit, idle client sockets pile up.
-func TestClosesAnIdleKeepAliveConnection(t *testing.T) {
-	t.Parallel()
-	h := startHub(t, "--listen", "127.0.0.1:0", "--data", store.Memory)
-	conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(h.port))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = conn.Close() }()
-	if _, err := io.WriteString(conn, "GET /healthz HTTP/1.1\r\nHost: hub\r\n\r\n"); err != nil {
-		t.Fatal(err)
-	}
-	reader := bufio.NewReader(conn)
-	res, err := http.ReadResponse(reader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = io.Copy(io.Discard, res.Body)
-	_ = res.Body.Close()
-	start := time.Now()
-	_ = conn.SetReadDeadline(start.Add(8 * time.Second))
-	if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
-		t.Fatalf("read on the idle connection = %v, want EOF", err)
-	}
-	if idle := time.Since(start); idle < 4*time.Second {
-		t.Errorf("closed after %v, want about 5s", idle)
+// The TypeScript hub sets keepAliveTimeout to 65 seconds. Without a limit, idle client sockets pile up.
+func TestClosesAnIdleKeepAliveConnectionAfter65Seconds(t *testing.T) {
+	if got := newHTTPServer(http.NotFoundHandler()).IdleTimeout; got != 65*time.Second {
+		t.Errorf("IdleTimeout = %v", got)
 	}
 }
 
