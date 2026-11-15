@@ -247,6 +247,38 @@ func TestReloadsTokensOnHangup(t *testing.T) {
 	}
 }
 
+func TestReloadsTheExternalFileOnHangupAndKeepsTheOldAgentsOnABadFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "external.json")
+	write := func(text string) {
+		t.Helper()
+		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"a": {"url": "http://127.0.0.1:1/", "token": "t"}}`)
+	h := startHub(t, "--listen", "127.0.0.1:0", "--data", store.Memory, "--external", file)
+	waitFor := func(text string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for !strings.Contains(h.stderr.String(), text) {
+			if time.Now().After(deadline) {
+				t.Fatalf("no %q in stderr: %q", text, h.stderr)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	write(`{"a": {"url": "http://127.0.0.1:1/", "token": "t"}, "b": {"url": "http://127.0.0.1:1/", "token": "t"}}`)
+	h.signals <- syscall.SIGHUP
+	waitFor("SIGHUP: external agents reloaded: 2\n")
+	write(`{ not json`)
+	h.signals <- syscall.SIGHUP
+	waitFor("SIGHUP: external reload failed, old agents kept: external file is not valid JSON\n")
+	if code := h.stop(t, syscall.SIGTERM); code != 0 {
+		t.Errorf("exit code = %d", code)
+	}
+}
+
 func TestExitCodes(t *testing.T) {
 	dir := t.TempDir()
 	newer := filepath.Join(dir, "newer")
@@ -265,11 +297,16 @@ func TestExitCodes(t *testing.T) {
 	if err := os.WriteFile(badTokens, []byte(`{"x": {"kind": "admin"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	badExternal := filepath.Join(dir, "external.json")
+	if err := os.WriteFile(badExternal, []byte(`{"h": {"url": "ftp://h/", "token": "t"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		args   []string
 		code   int
 		stderr string
 	}{
+		{[]string{"--listen", "127.0.0.1:0", "--data", store.Memory, "--external", badExternal}, 1, "external agent h: url must use http or https"},
 		{[]string{"--listen", "8080"}, 2, "--listen must be host:port, got 8080"},
 		{[]string{"--public-url", "hub.example"}, 2, "--public-url must start with http:// or https://"},
 		{[]string{"--nope"}, 1, "unknown option"},

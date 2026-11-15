@@ -20,6 +20,8 @@ import (
 	"github.com/orswn/a2a-hub/internal/auth"
 	"github.com/orswn/a2a-hub/internal/config"
 	"github.com/orswn/a2a-hub/internal/engine"
+	"github.com/orswn/a2a-hub/internal/external"
+	"github.com/orswn/a2a-hub/internal/gateway"
 	"github.com/orswn/a2a-hub/internal/link"
 	"github.com/orswn/a2a-hub/internal/push"
 	"github.com/orswn/a2a-hub/internal/pushguard"
@@ -76,6 +78,10 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	if err != nil {
 		return err
 	}
+	externals, err := external.Load(cfg.ExternalFile)
+	if err != nil {
+		return err
+	}
 	db, err := store.Open(context.Background(), cfg.Data)
 	if err != nil {
 		return err
@@ -118,6 +124,10 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	sender := push.New(hubEngine, push.Options{Guard: guard, Log: log})
 	sender.Start()
 	defer sender.Stop()
+	gw := gateway.New(hubEngine, gateway.Options{Log: log})
+	gw.Configure(externals)
+	gw.Start()
+	defer gw.Stop()
 	if _, err := hubEngine.Sweep(); err != nil {
 		return err
 	}
@@ -134,7 +144,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	}
 	hub := server.New(server.Options{
 		Version: version, Tokens: tokens, Engine: hubEngine, Link: links, Builtins: builtins,
-		PublicURL: cfg.PublicURL, Listen: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
+		Externals: gw, PublicURL: cfg.PublicURL, Listen: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
 		Heartbeat: cfg.Heartbeat, Log: log,
 	})
 	httpServer := newHTTPServer(hub)
@@ -148,7 +158,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 			return err
 		case sig := <-signals:
 			if sig == syscall.SIGHUP {
-				reloadTokens(cfg, hub, log)
+				reload(cfg, hub, gw, log)
 				continue
 			}
 			log(signalName(sig) + ": stopping")
@@ -191,7 +201,7 @@ func sweepEvery(e *engine.Engine, interval time.Duration, log func(string)) func
 	}
 }
 
-func reloadTokens(cfg config.Config, hub *server.Server, log func(string)) {
+func reload(cfg config.Config, hub *server.Server, gw *gateway.Gateway, log func(string)) {
 	tokens, err := auth.LoadTokens(cfg.TokensFile)
 	if err != nil {
 		log("SIGHUP: token reload failed, old tokens kept: " + err.Error())
@@ -199,7 +209,16 @@ func reloadTokens(cfg config.Config, hub *server.Server, log func(string)) {
 		hub.SetTokens(tokens)
 		log("SIGHUP: tokens reloaded")
 	}
-	// FIXME(okka): reload the external agent file here once the gateway exists.
+	if cfg.ExternalFile == "" {
+		return
+	}
+	agents, err := external.Load(cfg.ExternalFile)
+	if err != nil {
+		log("SIGHUP: external reload failed, old agents kept: " + err.Error())
+		return
+	}
+	gw.Configure(agents)
+	log("SIGHUP: external agents reloaded: " + strconv.Itoa(gw.Size()))
 }
 
 func signalName(sig os.Signal) string {
