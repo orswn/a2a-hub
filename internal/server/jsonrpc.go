@@ -536,6 +536,10 @@ func streamCall(ctx context.Context, h *a2aapi.Handler, call rpcCall) (iter.Seq2
 	return h.SubscribeToTask(ctx, req), nil
 }
 
+// streamWriteTimeout bounds one write to an A2A stream, so a client that stopped reading does not keep its
+// hold and its event queue.
+const streamWriteTimeout = time.Minute
+
 type streamItem struct {
 	event a2a.Event
 	err   error
@@ -584,6 +588,7 @@ func (s *Server) writeStream(ctx context.Context, cancel context.CancelFunc, w h
 	w.WriteHeader(http.StatusOK)
 	control := http.NewResponseController(w)
 	write := func(frame string) bool {
+		_ = control.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 		if _, err := w.Write([]byte(frame)); err != nil {
 			return false
 		}
