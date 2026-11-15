@@ -475,11 +475,11 @@ func TestMigrationMapsThePiKindToSessionInEveryTable(t *testing.T) {
 		exec1(t, raw, `INSERT INTO messages (id, agent_id, sender_agent, sender_principal, sender_name, sender_kind, context_id, kind, message, created_at)
 			VALUES (?, ?, ?, 'mars', 'x', ?, 'c1', 'task', '{}', ?)`, m[0], m[1], m[2], m[3], at)
 	}
-	pi := `{"messageId":"m1","contextId":"c1","from":{"agent":"lead","name":"l\u00e9ad ✓","kind":"` + legacyKind +
+	legacy := `{"messageId":"m1","contextId":"c1","from":{"agent":"lead","name":"l\u00e9ad ✓","kind":"` + legacyKind +
 		`"},"kind":"task","wake":"now","text":"x\u2028y \"kind\":\"` + legacyKind + `\"","data":{"n":1e21,"f":1.50,"list":[]}}`
 	events := [][]any{
-		{"kid", "message", pi, nil},
-		{"kid", "message", pi, at},
+		{"kid", "message", legacy, nil},
+		{"kid", "message", legacy, at},
 		{"lead", "message", `{"messageId":"m2","contextId":"c1","from":{"name":"hermes","kind":"peer"},"kind":"task","wake":"now","text":"t"}`, nil},
 		{"lead", "message", `{"messageId":"m3","contextId":"c1","from":{"agent":"hermes","name":"hermes","kind":"external"},"kind":"answer","wake":"now","text":"t"}`, nil},
 		{"lead", "update", `{"taskId":"t1","contextId":"c1","state":"working","from":{"agent":"kid","name":"kid"}}`, nil},
@@ -506,7 +506,7 @@ func TestMigrationMapsThePiKindToSessionInEveryTable(t *testing.T) {
 		"tck builtin - - {} 10")
 	expectColumn(t, db, "SELECT id || ' ' || sender_kind FROM messages ORDER BY seq",
 		"m1 session", "m2 peer", "m3 external", "m4 builtin", "m5 session", "m6 host")
-	session := strings.Replace(pi, `"kind":"`+legacyKind+`"},`, `"kind":"session"},`, 1)
+	session := strings.Replace(legacy, `"kind":"`+legacyKind+`"},`, `"kind":"session"},`, 1)
 	want := []string{session, session}
 	for _, e := range events[2:] {
 		want = append(want, e[2].(string))

@@ -30,7 +30,7 @@ function writeExternal(dir: string, entries: Record<string, Record<string, unkno
 	return file;
 }
 
-/** A pi session on host `mars` that sends A2A tasks with its own agent id and reads its link events. */
+/** A session on host `mars` that sends A2A tasks with its own agent id and reads its link events. */
 class Session {
 	readonly link: LinkClient;
 	readonly agent: string;
@@ -131,7 +131,7 @@ describe("hub external agents", () => {
 		tmp.dispose();
 	});
 
-	it("sends a pi task with SendStreamingMessage and maps the stream back to COMPLETED", async () => {
+	it("sends a session task with SendStreamingMessage and maps the stream back to COMPLETED", async () => {
 		const task = await bee.send("hermes", "what is A2A?");
 		expect(task.status?.state).toBe(TaskState.TASK_STATE_SUBMITTED);
 		await bee.update(task.id, "working");
@@ -293,7 +293,7 @@ describe("hub external agents", () => {
 		expect(inContext()[1]?.at).toBeGreaterThanOrEqual(finishedAt);
 	});
 
-	it("refreshes the card by TTL, goes offline after failed fetches, and tells pi peers", async () => {
+	it("refreshes the card by TTL, goes offline after failed fetches, and tells session peers", async () => {
 		const hits = athena.cardHits;
 		await athena.waitFor(() => athena.cardHits >= hits + 2);
 		const card = (await (await fetch(`${hub.url}/a2a/athena/.well-known/agent-card.json`)).json()) as Record<
@@ -333,7 +333,7 @@ describe("hub external agents", () => {
 		expect(failed.data["text"]).toBe("slowpoke gave no answer within 1 s");
 	});
 
-	it("resolves @hermes to the external agent while a pi session is named hermes", async () => {
+	it("resolves @hermes to the external agent while a session agent is named hermes", async () => {
 		const response = await fetch(`${hub.url}/a2a/@hermes/.well-known/agent-card.json`);
 		const card = (await response.json()) as { description: string; supportedInterfaces: { url: string }[] };
 		expect(card.description).toBe("Hermes Agent");

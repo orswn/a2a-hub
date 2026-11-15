@@ -512,7 +512,7 @@ func TestSendContinuesTheInterruptedTaskOfAnExternalAgentWhenItsPiSenderWritesIn
 	id := h.ask("hermes", asker, "research").Task.ID
 	got(h.engine.ApplyChange(id, TaskChange{State: StateInputRequired, Message: h.engine.AgentMessage("which topic?")})).ok(t)
 	if !h.ask("hermes", Caller{Principal: mars, Agent: "asker-2"}, "mine").Created {
-		t.Error("another pi sender did not create a task")
+		t.Error("another session sender did not create a task")
 	}
 	next := h.ask("hermes", asker, "A2A")
 	if next.Created || next.Task.ID != id || next.Task.Status.State != StateWorking {
@@ -632,7 +632,7 @@ func TestEnsureExternalKeepsAPiIDOutOfTheExternalRows(t *testing.T) {
 	h := setup(t)
 	h.register("asker")
 	if err := h.engine.EnsureExternal("asker", "x"); reason(t, err) == "" {
-		t.Error("EnsureExternal took a pi id")
+		t.Error("EnsureExternal took a session id")
 	}
 	if jobs := got(h.engine.ExternalJobs()).ok(t); len(jobs) != 0 {
 		t.Errorf("jobs = %+v", jobs)
