@@ -2,6 +2,7 @@
 package testagents
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/orswn/a2a-hub/internal/a2aapi"
@@ -107,10 +109,17 @@ func (a *Agents) runSteps(e *engine.Engine, taskID string, steps []step) {
 	for _, s := range steps {
 		// The send call returns before the first change, like the next macrotask in the TypeScript hub.
 		runtime.Gosched()
+		if a.ctx.Err() != nil {
+			return
+		}
 		var change engine.TaskChange
 		switch s.do {
 		case wait:
-			time.Sleep(time.Duration(s.ms) * time.Millisecond)
+			select {
+			case <-time.After(time.Duration(s.ms) * time.Millisecond):
+			case <-a.ctx.Done():
+				return
+			}
 			continue
 		case working:
 			change = engine.TaskChange{State: engine.StateWorking}
@@ -147,7 +156,35 @@ func (a *Agents) report(err error) { a.log("test agent failed: " + err.Error()) 
 
 // Agents holds the built-in agents of test mode.
 type Agents struct {
-	log func(line string)
+	log    func(line string)
+	ctx    context.Context
+	cancel context.CancelFunc
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+	closed bool
+}
+
+// goRun runs a scenario that Stop can end and wait for. It does nothing after Stop.
+func (a *Agents) goRun(run func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed {
+		return
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		run()
+	}()
+}
+
+// Stop ends the open scenarios and waits for them, so none calls the engine after it closes.
+func (a *Agents) Stop() {
+	a.mu.Lock()
+	a.closed = true
+	a.mu.Unlock()
+	a.cancel()
+	a.wg.Wait()
 }
 
 type tck struct{ *Agents }
@@ -169,7 +206,7 @@ func (tck) Reply(message *jsonx.Object, contextID string) *jsonx.Object {
 
 func (t tck) Start(e *engine.Engine, taskID string, message *jsonx.Object) {
 	id, _ := message.String("messageId")
-	go t.runSteps(e, taskID, tckSteps(id))
+	t.goRun(func() { t.runSteps(e, taskID, tckSteps(id)) })
 }
 
 type echo struct{ *Agents }
@@ -183,7 +220,7 @@ func (echo) Description() string {
 func (echo) Reply(*jsonx.Object, string) *jsonx.Object { return nil }
 
 func (a echo) Start(e *engine.Engine, taskID string, message *jsonx.Object) {
-	go func() {
+	a.goRun(func() {
 		runtime.Gosched()
 		body := engine.MessageText(message)
 		_, err := e.ApplyChange(taskID, engine.TaskChange{
@@ -195,20 +232,23 @@ func (a echo) Start(e *engine.Engine, taskID string, message *jsonx.Object) {
 		if err != nil && !hasReason(err, engine.ReasonTaskTerminal) {
 			a.report(err)
 		}
-	}()
+	})
 }
 
-// Install makes the built-in agents known to the engine and returns them by id. log gets the failures.
-func Install(e *engine.Engine, log func(line string)) (map[string]a2aapi.Builtin, error) {
+// Install makes the built-in agents known to the engine and returns them by id. log gets the failures. Stop the
+// returned Agents before the engine closes.
+func Install(e *engine.Engine, log func(line string)) (map[string]a2aapi.Builtin, *Agents, error) {
 	agents := &Agents{log: log}
+	agents.ctx, agents.cancel = context.WithCancel(context.Background())
 	out := map[string]a2aapi.Builtin{}
 	for _, agent := range []a2aapi.Builtin{tck{agents}, echo{agents}} {
 		if err := e.EnsureBuiltin(agent.ID(), agent.Name()); err != nil {
-			return nil, err
+			agents.cancel()
+			return nil, nil, err
 		}
 		out[agent.ID()] = agent
 	}
-	return out, nil
+	return out, agents, nil
 }
 
 func randomUUID() string {

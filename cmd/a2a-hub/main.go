@@ -96,9 +96,11 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	defer func() { _ = hubEngine.Close() }()
 	var builtins map[string]a2aapi.Builtin
 	if cfg.TestAgents {
-		if builtins, err = testagents.Install(hubEngine, log); err != nil {
+		var agents *testagents.Agents
+		if builtins, agents, err = testagents.Install(hubEngine, log); err != nil {
 			return err
 		}
+		defer agents.Stop()
 	}
 	links := link.New(hubEngine, link.Options{PresenceGrace: cfg.PresenceGrace, Heartbeat: cfg.Heartbeat, Log: log})
 	defer links.Stop()
