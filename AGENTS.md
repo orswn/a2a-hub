@@ -46,7 +46,7 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 - A wire change needs a protocol bump: a new `HUB_PROTOCOL`, a new schema file, and a contract suite for it. The old file stays while the hub accepts its clients.
 - Never edit a schema file by hand. Change `protocol/src` and run `npm --prefix protocol run schema`.
 - Flags, `HUB_*` env names, defaults, exit codes, and the stdout line `listening <port>` stay the same as the TypeScript hub.
-- The sqlite file stays compatible with the TypeScript hub until the cutover is verified.
+- The sqlite file stays compatible with Go `v1.0.0` (schema 2) until the release of schema 3. An older hub refuses a newer schema, so a rollback is a restore of the backup plus the older image.
 
 ## Model-visible text
 

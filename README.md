@@ -13,7 +13,7 @@ What exists now:
 - The push sender: it posts each task event to the webhooks of the task, with retries after 1 s, 5 s, and 30 s. It checks the address of each webhook again on the socket that it opens.
 - The gateway to external A2A agents, such as Hermes: it sends their hub tasks with `SendStreamingMessage`, maps the stream back to the hub task, falls back to `GetTask` after a dropped stream or a restart, retries after a rate limit or a connect failure, sends `CancelTask`, and refreshes each agent card. `SIGHUP` reloads the external agents file.
 - The built-in test agents `tck` and `echo` of `--test-agents`. The a2a-tck conformance suite runs against `tck` in CI.
-- The engine (`internal/engine`): agents and host binding, `@name` resolution, the task lifecycle, context follow-ups, status text, open questions, task scope, task lists with page tokens, the mailbox events with replay and ack, retention, push configs and the push outbox, and the job and dispatch rows of external agents. It writes the same rows as the TypeScript engine, so either hub opens a file that the other wrote.
+- The engine (`internal/engine`): agents and host binding, `@name` resolution, the task lifecycle, context follow-ups, status text, open questions, task scope, task lists with page tokens, the mailbox events with replay and ack, retention, push configs and the push outbox, and the job and dispatch rows of external agents.
 - The push URL guard (`internal/pushguard`): the config-time and send-time address checks and the allow list.
 - The protocol package `@orswn/a2a-hub-protocol` with the JSON Schema of link protocols 3 and 2.
 - The black-box contract suites of link protocols 3 and 2.
@@ -123,7 +123,7 @@ make verify
 - Database compatibility: the engine tests run one scenario that `internal/engine/testdata/compat.mjs` also runs with the TypeScript engine. After the schema 3 migration both files must hold the same rows, and the Go engine must read the committed TypeScript-written file in `testdata/compat-node` the same way. With `PIMON_DIR` set to a pimon checkout and `node` on `PATH`, the test also runs the TypeScript engine again and checks that it refuses the schema 3 file that the Go engine wrote.
 - Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that the files of earlier protocols have not changed.
 - Contract suite: `npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema of protocol 3. A reduced suite checks a protocol 2 client against the protocol 2 file.
-- Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, a restart, and external agents behind a fake A2A agent (`test/support/fake-hermes.ts`). With `HUB_BIN` set to a wrapper of the TypeScript hub, both suites also run against it.
+- Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, a restart, and external agents behind a fake A2A agent (`test/support/fake-hermes.ts`).
 - Conformance: CI runs a2a-tck against `/a2a/tck` of a hub with `--test-agents`. `scripts/tck-gate.py` fails the job on a failed MUST requirement or fewer than 75 MUST passes. `scripts/hub-python-client.py` then sends a task with the Python A2A SDK.
 
 ## Known wire differences from the TypeScript hub
