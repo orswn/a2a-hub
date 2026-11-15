@@ -57,7 +57,7 @@ make build            # bin/a2a-hub, static, CGO_ENABLED=0
 bin/a2a-hub --listen 127.0.0.1:8080 --data ./data --tokens ./tokens.json
 ```
 
-The hub prints `listening <port>` on stdout when it accepts connections. Logs go to stderr.
+The hub prints `listening <port>` on stdout when it accepts connections. Logs go to stderr. When the hub migrates an existing database, it logs one line such as `migrated schema 2 to 3`.
 
 | Flag | Env | Default | Meaning |
 |---|---|---|---|

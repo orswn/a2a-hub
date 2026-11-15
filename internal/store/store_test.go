@@ -548,3 +548,26 @@ func TestOpensDatabaseFreshlyWrittenByTheTypeScriptHub(t *testing.T) {
 	}
 	checkNodeDatabase(t, dir)
 }
+
+func TestOpenLogsOnceWhenItMigratesAnExistingDatabase(t *testing.T) {
+	var lines []string
+	log := func(line string) { lines = append(lines, line) }
+	open := func(dir string) {
+		t.Helper()
+		db, err := OpenWithLog(context.Background(), dir, log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	copyFile(t, filepath.Join("testdata", "node-v2", FileName), filepath.Join(dir, FileName))
+	open(dir)
+	open(dir)
+	open(t.TempDir())
+	if want := []string{"migrated schema 2 to 3"}; !reflect.DeepEqual(lines, want) {
+		t.Errorf("lines = %q, want %q", lines, want)
+	}
+}

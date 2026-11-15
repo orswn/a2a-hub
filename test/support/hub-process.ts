@@ -50,6 +50,7 @@ export interface HubProcess {
 	url: string;
 	port: number;
 	child: ChildProcess;
+	stdout(): string;
 	stderr(): string;
 	stop(signal?: NodeJS.Signals): Promise<number | null>;
 }
@@ -82,8 +83,8 @@ export async function startHubProcess(options: {
 		stderr += chunk.toString();
 	});
 	const exited = new Promise<number | null>((done) => child.once("exit", (code) => done(code)));
+	let out = "";
 	const port = await new Promise<number>((done, fail) => {
-		let out = "";
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
 			fail(new Error(`hub did not start: ${stderr}`));
@@ -109,6 +110,7 @@ export async function startHubProcess(options: {
 		url: `http://127.0.0.1:${port}`,
 		port,
 		child,
+		stdout: () => out,
 		stderr: () => stderr,
 		stop: async (signal = "SIGTERM") => {
 			if (child.exitCode === null && child.signalCode === null) child.kill(signal);

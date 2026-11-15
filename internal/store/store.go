@@ -42,6 +42,11 @@ func (e *NewerSchemaError) Error() string {
 // Open opens hub.sqlite in the data directory, or an in-memory database for Memory, and migrates it.
 // The pool has one connection: sqlite has one writer, and an in-memory database exists only on its connection.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
+	return OpenWithLog(ctx, path, nil)
+}
+
+// OpenWithLog is Open. When it migrates an existing database, it logs one line with the old and new schema.
+func OpenWithLog(ctx context.Context, path string, log func(string)) (*sql.DB, error) {
 	dsn := "file:" + Memory + "?" + connPragmas
 	if path != Memory {
 		if err := os.MkdirAll(path, 0o777); err != nil { //nolint:gosec // G301: the umask decides, like mkdirSync in the TypeScript hub.
@@ -56,9 +61,13 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
-	if err := Migrate(ctx, db, Migrations); err != nil {
+	from, err := migrate(ctx, db, Migrations)
+	if err != nil {
 		_ = db.Close()
 		return nil, err
+	}
+	if log != nil && from > 0 && from < len(Migrations) {
+		log(fmt.Sprintf("migrated schema %d to %d", from, len(Migrations)))
 	}
 	return db, nil
 }
@@ -70,17 +79,23 @@ func uriPath(path string) string {
 
 // Migrate applies the migrations after the database user_version. It refuses a database from a newer hub.
 func Migrate(ctx context.Context, db *sql.DB, migrations []Migration) error {
+	_, err := migrate(ctx, db, migrations)
+	return err
+}
+
+// migrate is Migrate. It also returns the user_version before the migrations.
+func migrate(ctx context.Context, db *sql.DB, migrations []Migration) (int, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = conn.Close() }()
 	var from int
 	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&from); err != nil {
-		return err
+		return 0, err
 	}
 	if from > len(migrations) {
-		return &NewerSchemaError{Found: from, Known: len(migrations)}
+		return from, &NewerSchemaError{Found: from, Known: len(migrations)}
 	}
 	for version := from; version < len(migrations); version++ {
 		migration := migrations[version]
@@ -94,10 +109,10 @@ func Migrate(ctx context.Context, db *sql.DB, migrations []Migration) error {
 		// Every migration runs with foreign keys off, so a DROP TABLE cannot cascade into child rows. A
 		// migration that would have cascaded fails at the foreign key check instead.
 		if err := RebuildTables(ctx, conn, apply); err != nil {
-			return fmt.Errorf("migrate schema %d to %d: %w", version, version+1, err)
+			return from, fmt.Errorf("migrate schema %d to %d: %w", version, version+1, err)
 		}
 	}
-	return nil
+	return from, nil
 }
 
 func inTransaction(ctx context.Context, conn *sql.Conn, body func(context.Context, *sql.Conn) error) error {

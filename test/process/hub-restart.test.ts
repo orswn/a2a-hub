@@ -1,10 +1,14 @@
+import { copyFileSync, mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { TaskState } from "@a2a-js/sdk";
 import type { Client } from "@a2a-js/sdk/client";
 import { afterAll, describe, expect, it } from "vitest";
 import {
 	a2aClient,
 	bearer,
+	HOST_TOKEN,
 	type HubProcess,
+	LEGACY,
 	LinkClient,
 	PEER_TOKEN,
 	partText,
@@ -26,6 +30,31 @@ describe("hub restart", () => {
 		for (const link of links) await link.close();
 		for (const hub of hubs) await hub.stop("SIGKILL");
 		tmp.dispose();
+	});
+
+	it("migrates a schema 2 file, logs it once to stderr, and keeps stdout to the listening line", async () => {
+		const dataDir = `${tmp.dir}/schema2`;
+		mkdirSync(dataDir);
+		copyFileSync(resolve(import.meta.dirname, "../../internal/store/testdata/node-v2/hub.sqlite"), `${dataDir}/hub.sqlite`);
+		const tokensFile = writeTokens(tmp.dir);
+		const migrated = (stderr: string) => stderr.split("\n").filter((line) => line.includes("migrated schema"));
+
+		const first = await startHubProcess({ dataDir, tokensFile });
+		hubs.push(first);
+		const response = await fetch(`${first.url}/agents?offline=1`, { headers: bearer(HOST_TOKEN) });
+		const agents = ((await response.json()) as { agents: { kind: string; labels: Record<string, string> }[] }).agents;
+		expect(agents.filter((agent) => agent.kind === "session").map((agent) => agent.labels["harness"])).toEqual([
+			LEGACY.harness,
+			LEGACY.harness,
+		]);
+		expect(await first.stop()).toBe(0);
+		expect(first.stdout()).toBe(`listening ${first.port}\n`);
+		expect(migrated(first.stderr())).toEqual([expect.stringMatching(/ migrated schema 2 to 3$/)]);
+
+		const second = await startHubProcess({ dataDir, tokensFile });
+		hubs.push(second);
+		expect(await second.stop()).toBe(0);
+		expect(migrated(second.stderr())).toEqual([]);
 	});
 
 	it("keeps a WORKING task across a restart, then completes and pushes it", async () => {

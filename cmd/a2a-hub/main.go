@@ -82,7 +82,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	if err != nil {
 		return err
 	}
-	db, err := store.Open(context.Background(), cfg.Data)
+	db, err := store.OpenWithLog(context.Background(), cfg.Data, log)
 	if err != nil {
 		return err
 	}
