@@ -74,7 +74,7 @@ A message to an external agent that answers or continues a hub thread that the a
 
 - `X-Webhook-Timestamp`: Unix seconds.
 - `X-Webhook-Signature-V2`: lowercase hex HMAC-SHA256 of `<timestamp>.<raw body>` with the secret.
-- `X-Request-ID`: the hub message id, the same on each try.
+- `X-Request-ID`: the hub message id. Hermes records the id before it delivers and answers a known id with 200 `duplicate`. So a try after a 5xx answer uses `<message id>.r<try>`, and a try after a network error keeps the id.
 
 The JSON body:
 
@@ -86,7 +86,7 @@ The JSON body:
  "task_id": "...", "state": "completed", "text": "..."}
 ```
 
-`origin` is the origin of the send that started the thread. Each of its fields is a string, `""` when unknown. The hub tries 3 times, 1 s and 4 s apart, after a network error or a 5xx answer. Another answer ends the tries. A failed post is logged. The message stays in the inbox until `inbox` reads it. Tasks, questions, and corrections outside such a thread still go to the agent over A2A.
+`origin` is the origin of the send that started the thread. Each of its fields is a string, `""` when unknown. The hub tries 3 times, 1 s and 4 s apart, after a network error or a 5xx answer. Another answer ends the tries. After the last failure the hub logs one line that starts with `webhook delivery failed; the message stays in the inbox`. The queue of posts is in memory: a restart or a full queue of 256 loses the post, and the hub does not post it again at the next start. The message stays in the inbox until `inbox` reads it. Tasks, questions, and corrections outside such a thread still go to the agent over A2A.
 
 ## Build
 

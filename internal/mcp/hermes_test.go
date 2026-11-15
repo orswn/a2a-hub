@@ -246,19 +246,89 @@ func TestASendWithoutOriginPostsEmptyOriginStrings(t *testing.T) {
 	mustContain(t, "body", hook.bodies[0], `"origin":{"platform":"","chat_id":"","thread_id":""}`)
 }
 
-func TestTheWebhookPostIsRetriedOnAServerErrorWithTheSameRequestID(t *testing.T) {
-	hook := newReceiver(t, http.StatusBadGateway, http.StatusInternalServerError)
-	h, c := hermesSetup(t, hook, time.Millisecond, time.Millisecond)
-	messageID, _ := sentIDs(t, c.ok("send", args("target", "p1", "text", "hello")))
-	h.sendFrom("p1", "hermes", "m-answer", "kind", "answer", "replyTo", messageID)
-	hook.wait(t, 3)
-	for _, request := range hook.requests {
-		if request.Header.Get("X-Request-ID") != "m-answer" {
-			t.Errorf("request id = %q", request.Header.Get("X-Request-ID"))
+// hermesRoute acts like a deliver_only route of the Hermes webhook platform: it records the request id before it
+// delivers, answers a known id with 200 duplicate, and fails the delivery of the first new ids with 502.
+type hermesRoute struct {
+	mu        sync.Mutex
+	ids       []string
+	seen      map[string]bool
+	failures  int
+	drops     int
+	delivered []string
+	url       string
+}
+
+func newHermesRoute(t *testing.T, drops, failures int) *hermesRoute {
+	route := &hermesRoute{seen: map[string]bool{}, failures: failures, drops: drops}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		id := r.Header.Get("X-Request-ID")
+		route.mu.Lock()
+		defer route.mu.Unlock()
+		route.ids = append(route.ids, id)
+		if route.seen[id] {
+			_, _ = w.Write([]byte(`{"status":"duplicate"}`))
+			return
 		}
+		route.seen[id] = true
+		if route.drops > 0 {
+			// Delivered, but the answer is lost.
+			route.drops--
+			route.delivered = append(route.delivered, id)
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		if route.failures > 0 {
+			route.failures--
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		route.delivered = append(route.delivered, id)
+	}))
+	t.Cleanup(server.Close)
+	route.url = server.URL + "/webhooks/a2a-hub"
+	return route
+}
+
+func (r *hermesRoute) state() (ids, delivered []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.ids...), append([]string(nil), r.delivered...)
+}
+
+func hermesRouteSetup(t *testing.T, route *hermesRoute) (*env, string) {
+	t.Helper()
+	h, c := hermesSetup(t, nil, time.Millisecond, time.Millisecond)
+	h.hooks.set("hermes", &external.Webhook{URL: route.url, Secret: secret})
+	messageID, _ := sentIDs(t, c.ok("send", args("target", "p1", "text", "hello")))
+	return h, messageID
+}
+
+func TestAWebhookRetryAfterAServerErrorUsesANewRequestID(t *testing.T) {
+	route := newHermesRoute(t, 0, 1)
+	h, messageID := hermesRouteSetup(t, route)
+	h.sendFrom("p1", "hermes", "m-answer", "kind", "answer", "replyTo", messageID)
+	eventually(t, "delivered", func() bool { _, delivered := route.state(); return len(delivered) == 1 })
+	ids, delivered := route.state()
+	if strings.Join(ids, " ") != "m-answer m-answer.r2" || delivered[0] != "m-answer.r2" {
+		t.Errorf("ids = %q, delivered = %q", ids, delivered)
 	}
-	if strings.Contains(h.logged(), "webhook post") {
+	if strings.Contains(h.logged(), "webhook") {
 		t.Errorf("logged = %q", h.logged())
+	}
+}
+
+func TestAWebhookRetryAfterALostAnswerKeepsTheRequestID(t *testing.T) {
+	route := newHermesRoute(t, 1, 0)
+	h, messageID := hermesRouteSetup(t, route)
+	h.sendFrom("p1", "hermes", "m-answer", "kind", "answer", "replyTo", messageID)
+	eventually(t, "retried", func() bool { ids, _ := route.state(); return len(ids) == 2 })
+	ids, delivered := route.state()
+	if strings.Join(ids, " ") != "m-answer m-answer" || len(delivered) != 1 {
+		t.Errorf("ids = %q, delivered = %q", ids, delivered)
 	}
 }
 
@@ -268,13 +338,24 @@ func TestTheWebhookPostStopsAfterThreeTriesOrARefusal(t *testing.T) {
 	messageID, _ := sentIDs(t, c.ok("send", args("target", "p1", "text", "hello")))
 	h.sendFrom("p1", "hermes", "m-1", "kind", "answer", "replyTo", messageID)
 	hook.wait(t, 3)
-	eventually(t, "logged", func() bool {
-		return strings.Contains(h.logged(), "m-1 for hermes failed: status 503; it stays in the inbox")
-	})
+	want := "webhook delivery failed; the message stays in the inbox: message m-1 for hermes, status 503"
+	eventually(t, "logged", func() bool { return strings.Contains(h.logged(), want) })
 	h.sendFrom("p1", "hermes", "m-2", "kind", "answer", "replyTo", messageID)
-	eventually(t, "refusal logged", func() bool { return strings.Contains(h.logged(), "m-2 for hermes failed: status 401") })
+	eventually(t, "refusal logged", func() bool {
+		return strings.Contains(h.logged(), "webhook delivery failed; the message stays in the inbox: message m-2 for hermes, status 401")
+	})
 	if hook.count() != 4 {
 		t.Errorf("posts = %d", hook.count())
+	}
+	var ids []string
+	for _, request := range hook.requests {
+		ids = append(ids, request.Header.Get("X-Request-ID"))
+	}
+	if strings.Join(ids, " ") != "m-1 m-1.r2 m-1.r3 m-2" {
+		t.Errorf("ids = %q", ids)
+	}
+	if lines := strings.Count(h.logged(), "\n") + 1; lines != 2 || strings.Contains(h.logged(), secret) {
+		t.Errorf("logged = %q", h.logged())
 	}
 	mustContain(t, "inbox", c.ok("inbox", args()), "messageId=m-1", "messageId=m-2")
 }

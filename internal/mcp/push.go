@@ -280,32 +280,39 @@ func harnessLabel(labels string) string {
 	return harness
 }
 
-// postWebhook tries a webhook post again on a network error or a 5xx answer. The message stays in the inbox either way.
+// postWebhook tries a webhook post again on a network error or a 5xx answer. The message stays in the inbox either
+// way.
 func (s *Server) postWebhook(hook external.Webhook, messageID, agentID string, body []byte) {
-	for try := 0; ; try++ {
-		status, err := s.postOnce(hook, messageID, body)
+	requestID := messageID
+	for try := 1; ; try++ {
+		status, err := s.postOnce(hook, requestID, body)
 		if err == nil && status < 300 {
 			return
 		}
 		retry := err != nil || status >= 500
-		reason := "status " + strconv.Itoa(status)
-		if err != nil {
-			reason = err.Error()
-		}
-		if !retry || try >= len(s.opts.RetryDelays) {
-			s.opts.Log("webhook post of message " + messageID + " for " + agentID + " failed: " + reason +
-				"; it stays in the inbox")
+		if !retry || try > len(s.opts.RetryDelays) {
+			reason := "status " + strconv.Itoa(status)
+			if err != nil {
+				reason = err.Error()
+			}
+			s.opts.Log("webhook delivery failed; the message stays in the inbox: message " + messageID + " for " +
+				agentID + ", " + reason)
 			return
+		}
+		// Hermes records a request id before it delivers. After a 5xx it did not deliver, and the same id would
+		// get 200 duplicate. After a network error it may have delivered, so the id stays.
+		if err == nil {
+			requestID = messageID + ".r" + strconv.Itoa(try+1)
 		}
 		select {
 		case <-s.stop:
 			return
-		case <-time.After(s.opts.RetryDelays[try]):
+		case <-time.After(s.opts.RetryDelays[try-1]):
 		}
 	}
 }
 
-func (s *Server) postOnce(hook external.Webhook, messageID string, body []byte) (int, error) {
+func (s *Server) postOnce(hook external.Webhook, requestID string, body []byte) (int, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -321,8 +328,7 @@ func (s *Server) postOnce(hook external.Webhook, messageID string, body []byte) 
 	}
 	timestamp := strconv.FormatInt(s.opts.Now().Unix(), 10)
 	request.Header.Set("Content-Type", "application/json")
-	// Hermes drops a repeated request id, so a retry after a lost answer does not post the reply twice.
-	request.Header.Set("X-Request-ID", messageID)
+	request.Header.Set("X-Request-ID", requestID)
 	request.Header.Set("X-Webhook-Timestamp", timestamp)
 	request.Header.Set("X-Webhook-Signature-V2", Sign(hook.Secret, timestamp, body))
 	response, err := s.opts.Client.Do(request)
