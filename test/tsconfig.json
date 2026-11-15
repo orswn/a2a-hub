@@ -19,5 +19,5 @@
 		"skipLibCheck": true,
 		"resolveJsonModule": true
 	},
-	"include": ["contract", "support", "vitest.config.ts"]
+	"include": ["contract", "process", "support", "vitest.config.ts"]
 }

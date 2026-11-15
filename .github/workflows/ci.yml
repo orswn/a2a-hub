@@ -50,7 +50,7 @@ jobs:
           cache-dependency-path: |
             protocol/package-lock.json
             test/package-lock.json
-      - run: make protocol-test contract RUN=
+      - run: make protocol-test contract process RUN=
 
   image:
     # Builds and runs the image on every push and pull request, so Containerfile errors show before a release.
@@ -136,8 +136,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   conformance:
-    # FIXME(okka): enable when the A2A routes exist.
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:

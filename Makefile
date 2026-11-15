@@ -4,9 +4,9 @@ GOLANGCI_LINT ?= mise exec aqua:golangci/golangci-lint@2.15.0 -- golangci-lint
 HADOLINT ?= mise exec aqua:hadolint/hadolint@2.14.0 -- hadolint
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 
-.PHONY: verify fmt-check vet lint go-test protocol-test contract build bin/a2a-hub vuln containerfile-lint clean
+.PHONY: verify fmt-check vet lint go-test protocol-test contract process build bin/a2a-hub vuln containerfile-lint clean
 
-verify: fmt-check vet lint go-test protocol-test contract
+verify: fmt-check vet lint go-test protocol-test contract process
 
 fmt-check:
 	@out="$$($(RUN) gofmt -l $$(git ls-files '*.go'))"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -37,6 +37,9 @@ protocol-test: protocol/node_modules/.package-lock.json
 
 contract: bin/a2a-hub test/node_modules/.package-lock.json
 	HUB_BIN=$(CURDIR)/bin/a2a-hub $(RUN) npm --prefix test run contract
+
+process: bin/a2a-hub test/node_modules/.package-lock.json
+	HUB_BIN=$(CURDIR)/bin/a2a-hub $(RUN) npm --prefix test run process
 
 vuln:
 	$(RUN) go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

@@ -4,12 +4,13 @@ The A2A 1.0 hub for agent harness sessions (pi, Claude Code, Codex) and external
 
 ## Commands
 
-- `make verify`: gofmt check, `go vet`, `golangci-lint`, `go test -race`, the protocol package tests, and the contract suite against a binary built from the current sources. Run it before each commit.
+- `make verify`: gofmt check, `go vet`, `golangci-lint`, `go test -race`, the protocol package tests, and the contract and process suites against a binary built from the current sources. Run it before each commit.
 - `make build`: the static binary `bin/a2a-hub`. The version comes from `git describe`.
 - `mise exec -- go test ./...`: the Go unit tests only.
 - `npm --prefix protocol run schema`: write `protocol/schema/hub-protocol-v<N>.json` after a change in `protocol/src`.
 - `npm --prefix protocol test`: schema drift check, type check, and protocol tests.
-- `CONTRACT_PENDING=1 npm --prefix test run contract`: the contract suite against `bin/a2a-hub`, or against env `HUB_BIN`.
+- `npm --prefix test run contract`: the contract suite against `bin/a2a-hub`, or against env `HUB_BIN`.
+- `npm --prefix test run process`: the process suites (A2A face, link API, restart) against the same binary.
 - `make vuln`: `govulncheck`.
 - `make containerfile-lint`: `hadolint` on the `Containerfile`.
 
@@ -21,9 +22,14 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 - `internal/config/`: flags, `HUB_*` env, defaults.
 - `internal/auth/`: token file and bearer lookup.
 - `internal/store/`: sqlite open, schema, migrations, table rebuild.
-- `internal/server/`: the HTTP front.
+- `internal/engine/`: agents, tasks, messages, mailbox events, push outbox. All database access goes through it.
+- `internal/a2aapi/`: the A2A request handler on a2a-go types, agent cards, hold limits, delivery states.
+- `internal/server/`: the HTTP front: routes, JSON-RPC and SSE framing, link routes.
+- `internal/link/`: link event streams, heartbeat, and presence.
+- `internal/push/`: the push sender. `internal/pushguard/`: the push address checks.
+- `internal/testagents/`: the `tck` and `echo` agents of `--test-agents`.
 - `protocol/`: TypeBox source, constants, route manifest, generator, and the committed JSON Schema of the link protocol.
-- `test/`: TypeScript workspace with the black-box contract suite.
+- `test/`: TypeScript workspace with the black-box contract and process suites.
 - `scripts/`: `tck-gate.py` and `hub-python-client.py` for the conformance job.
 
 ## Code rules
