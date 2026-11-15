@@ -1,0 +1,19 @@
+# Links each Codex thread of this host to the a2a hub and wakes threads for hub messages.
+# Install: cp to ~/.config/systemd/user/, then systemctl --user daemon-reload.
+# A restart of this unit does not touch running Codex sessions.
+[Unit]
+Description=a2a hub adapter for Codex threads
+Documentation=https://github.com/orswn/a2a-hub#codex
+Wants=a2a-codex-server.service
+After=a2a-codex-server.service
+
+[Service]
+Type=simple
+# The unit gets the user manager environment, not the terminal environment.
+# For another hub: systemctl --user edit, then Environment=A2A_HUB_URL=<url>.
+ExecStart=%h/.local/bin/a2a codex-adapter
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

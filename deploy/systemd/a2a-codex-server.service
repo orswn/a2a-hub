@@ -1,0 +1,17 @@
+# Codex app-server of this host, with the a2a hub as MCP server "a2a".
+# Install: cp to ~/.config/systemd/user/, then systemctl --user daemon-reload.
+# A restart of this unit ends every Codex TUI that runs on it.
+[Unit]
+Description=Codex app-server with the a2a hub MCP server
+Documentation=https://github.com/orswn/a2a-hub#codex
+
+[Service]
+Type=simple
+# The unit gets the user manager environment, not the terminal environment.
+# For another hub: systemctl --user edit, then Environment=A2A_HUB_URL=<url>.
+ExecStart=%h/.local/bin/a2a codex-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

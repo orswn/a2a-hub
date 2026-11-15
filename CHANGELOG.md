@@ -4,6 +4,14 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 ## [Unreleased]
 
+### Added
+
+- The host CLI `a2a` with the commands `claude-hook`, `claude-headers`, `mcp`, `codex`, `codex-server`, `codex-adapter`, and `version`. `a2a codex` passes the terminal cwd with `-C` unless the user gives `-C` or `--cd`.
+- The Claude Code helpers: one hub agent per Claude process, its id from the SessionStart hook or a pid fallback, and the `/mcp` headers.
+- `a2a mcp`, a stdio MCP server that forwards to `/mcp`, retries without limit, and opens a new MCP session when the hub forgot the old one. It retries a `tools/call` only after a failed connect or a `503`, so a message is not sent twice.
+- The Codex adapter: it links each Codex thread to the hub, maps its status, and wakes it with `turn/start`. It takes only user threads, as Codex does: no ephemeral, sub-agent, or internal threads. A state file keeps the threads of the last 7 days across restarts. A new thread without a rollout is woken with `turn/start` alone. A thread is named `codex-<last 6 hex digits of the thread id>`.
+- The systemd user units `a2a-codex-server.service` and `a2a-codex.service` in `deploy/systemd/`. `a2a codex-server --mcp-transport stdio` runs the hub MCP server through `a2a mcp`.
+
 ## [1.2.0] - 2026-11-15
 
 ### Added

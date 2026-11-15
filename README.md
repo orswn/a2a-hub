@@ -18,6 +18,7 @@ What exists now:
 - The protocol package `@orswn/a2a-hub-protocol` with the JSON Schema of link protocols 3 and 2.
 - The black-box contract suites of link protocols 3 and 2.
 - The MCP endpoint `/mcp` for Claude Code, Codex, and Hermes, with Claude Code channel pushes and signed reply webhooks to Hermes. See [MCP endpoint](#mcp-endpoint).
+- The host CLI `a2a`: the Claude Code helpers, the stdio MCP shim, and the Codex launcher, app-server unit, and adapter. See [Host CLI](#host-cli-a2a).
 
 ## Agent kinds and protocol versions
 
@@ -41,7 +42,6 @@ Every harness session registers as kind `session`. The label `harness` names the
 
 Planned:
 
-- The `a2a` host CLI and the Codex adapter.
 - A released container image. CI builds it now but pushes it only on a `v*` tag.
 
 ## MCP endpoint
@@ -87,6 +87,141 @@ The JSON body:
 ```
 
 `origin` is the origin of the send that started the thread. Each of its fields is a string, `""` when unknown. The hub tries 3 times, 1 s and 4 s apart, after a network error or a 5xx answer. Another answer ends the tries. After the last failure the hub logs one line that starts with `webhook delivery failed; the message stays in the inbox`. The queue of posts is in memory: a restart or a full queue of 256 loses the post, and the hub does not post it again at the next start. The message stays in the inbox until `inbox` reads it. Tasks, questions, and corrections outside such a thread still go to the agent over A2A.
+
+## Host CLI `a2a`
+
+`a2a` connects the Claude Code and Codex sessions of a host to the hub. One binary has all commands:
+
+| Command | Use |
+|---|---|
+| `a2a claude-hook` | SessionStart hook of Claude Code. Records the session id of the Claude process. |
+| `a2a claude-headers` | `headersHelper` of the Claude Code MCP server. Prints the hub headers as JSON. |
+| `a2a mcp [--harness codex\|claude-code]` | stdio MCP server that forwards to `<hub>/mcp`. A fallback for a client that cannot use HTTP MCP. It retries a `tools/call` only after a failed connect or a `503`. |
+| `a2a codex [args]` | Starts the Codex units if they do not run, then runs `codex --remote unix://$XDG_RUNTIME_DIR/a2a/codex.sock -C <cwd> [args]`. |
+| `a2a codex-server [--mcp-transport http\|stdio]` | Runs `codex app-server` on that socket with the hub as MCP server `a2a`. Used by a unit. |
+| `a2a codex-adapter` | Links each Codex thread to the hub. Used by a unit. |
+| `a2a version` | Prints the version. |
+
+Install:
+
+```sh
+GOPRIVATE=github.com/orswn GOBIN=~/.local/bin mise exec go@1.26.11 -- go install github.com/orswn/a2a-hub/cmd/a2a@vX.Y.Z
+```
+
+### Token and hub URL
+
+- Every command reads the host token from `~/.config/a2a/host.token`.
+- The file must be a regular file of the user with mode `0600`. Else the command stops with an error.
+- The hub URL is `--hub`, else env `A2A_HUB_URL`, else `https://a2a-hub.rswn.dev`. The MCP URL is `<hub>/mcp`.
+
+```sh
+install -d -m 0700 ~/.config/a2a
+install -m 0600 /dev/stdin ~/.config/a2a/host.token   # paste the token, then Ctrl-D
+```
+
+### Claude Code
+
+Each Claude process is one hub agent. The hook and the headers helper share the file `$XDG_RUNTIME_DIR/a2a/claude/<pid>.json`:
+
+- The hook writes the session id. A `/clear` gives a new session id but keeps the agent.
+- The first headers call picks the agent id: the session id of the hook if it comes within 3 s, else `claude-<host>-<pid>-<start>`. Claude starts the MCP connect without waiting for the hook, so the helper waits for it.
+- Later headers calls, such as reconnects, reuse the agent id.
+- A file of an older process with the same pid has another start time. The helper replaces it.
+- `claude --resume <id>` starts a new process whose first session id is `<id>`, so it maps to the same agent.
+
+Setup, once per host. These commands change the Claude config, so run them by hand:
+
+```sh
+claude mcp add-json -s user a2a '{"type":"http","url":"https://a2a-hub.rswn.dev/mcp","headersHelper":"a2a claude-headers"}'
+```
+
+Keep the helper a plain command. A redirect or pipe changes its parent process.
+
+The SessionStart hook in `~/.claude/settings.json`:
+
+```json
+{
+	"hooks": {
+		"SessionStart": [{ "hooks": [{ "type": "command", "command": "a2a claude-hook" }] }]
+	}
+}
+```
+
+Claude delivers hub messages only with the channel flag. Add `--dangerously-load-development-channels server:a2a` to your existing `claude` alias, and keep its other flags. Without an alias:
+
+```sh
+alias claude='claude --dangerously-load-development-channels server:a2a'
+```
+
+Claude gives up on a dropped HTTP MCP server after about 15 s. The stdio shim retries without limit. To use it, register the shim instead:
+
+```sh
+claude mcp add-json -s user a2a '{"type":"stdio","command":"a2a","args":["mcp","--harness","claude-code"]}'
+```
+
+### Codex
+
+Two systemd user units in `deploy/systemd/` run Codex for the hub:
+
+- `a2a-codex-server.service` runs `a2a codex-server`: `codex app-server --listen unix://$XDG_RUNTIME_DIR/a2a/codex.sock` with the hub as MCP server `a2a`. The token is only in the environment of this process. A restart of this unit ends every Codex TUI on the host.
+- `a2a-codex.service` runs `a2a codex-adapter`. It can restart alone. Its restart does not touch the Codex sessions.
+
+The units get the environment of the systemd user manager, not the environment of your terminal. With `a2a codex`, the TUI is only a client: Codex runs its commands inside the app-server. So these commands do not see `SSH_AUTH_SOCK` or keys that `~/.bashrc` exports. Check the manager environment with `systemctl --user show-environment`. Add a missing value with `systemctl --user set-environment NAME=value`, or with `Environment=` in `systemctl --user edit a2a-codex-server.service`.
+
+Install, once per host. `go install` keeps the module source in the Go module cache, so the unit files are there:
+
+```sh
+src="$(mise exec go@1.26.11 -- go env GOMODCACHE)/github.com/orswn/a2a-hub@vX.Y.Z"
+install -d ~/.config/systemd/user
+install -m 0644 "$src"/deploy/systemd/a2a-codex-server.service "$src"/deploy/systemd/a2a-codex.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now a2a-codex-server.service a2a-codex.service
+```
+
+From a clone of this repository, use `src=.` instead.
+
+To use another hub, add `Environment=A2A_HUB_URL=<url>` to both units with `systemctl --user edit`.
+
+Codex sends the thread id of each tool call in `_meta.threadId`, and the hub maps it to the thread agent. If that does not reach the hub over HTTP, run the hub MCP server over stdio through `a2a mcp`. Set this in `systemctl --user edit a2a-codex-server.service`:
+
+```ini
+[Service]
+ExecStart=
+ExecStart=%h/.local/bin/a2a codex-server --mcp-transport stdio
+```
+
+Start Codex with `a2a codex`. It takes the same arguments as `codex`, such as `a2a codex resume --last`. It adds `-C` with the current directory unless you give `-C` or `--cd`: with `--remote`, Codex otherwise starts a new thread in the directory of the app-server. A resumed thread keeps its own directory. An alias makes it the default:
+
+```sh
+alias codex='a2a codex'
+```
+
+The adapter:
+
+- Registers each Codex thread as a session agent: agent id = thread id, `labels.harness=codex`, the thread cwd, and the thread name, else `codex-<last 6 hex digits of the thread id>`.
+- Takes only user threads, as Codex itself does. It skips ephemeral threads, sub-agent threads (a `parentThreadId` or a sub-agent `source`), internal threads (`source` `unknown`), and a `threadSource` other than `user`.
+- Finds threads at connect, on `thread/started`, on any status or name event of an unknown thread, and every 30 s through `thread/loaded/list`.
+- Maps the thread status `active` to `busy` and all else to `idle`.
+- Keeps a thread online when Codex unloads it, so a message can still wake it. After 7 days without activity the thread goes offline. Its next event registers it again.
+- Wakes a thread for a `wake=now` message and for a task update with text in a final, `input-required`, or `auth-required` state. A wake is `thread/resume` with `excludeTurns` unless the adapter is subscribed to the thread, then `turn/start` with the text below. `turn/start` steers a running turn.
+- Drops its subscription with `thread/unsubscribe` at the next `idle`, so Codex can unload the thread as usual. An `idle` during a wake takes effect at the end of the wake, if the thread is still idle.
+- Acks a link event only after `turn/start` succeeds. It handles the events of a thread in order, so a waiting wake holds back the later acks of that thread.
+- Retries an overloaded (`-32001`), stopping, or lost app-server with backoff and no limit. A wake that meets a review or compact turn waits for `turn/completed` or `idle`, then tries again. After 5 other errors the event stays unacked, and the thread goes offline until its next event.
+- Sets a `submitted` task to `working` after its turn starts.
+- Takes a thread offline when Codex has no rollout for it and has not loaded it. A new thread has no rollout until its first turn. Its first wake is a `turn/start` without `thread/resume`.
+- Never answers approvals and never sets turn policies.
+
+The wake text:
+
+```text
+Hub message from <name> (<harness>) kind=<kind> messageId=<id>: <text>
+```
+
+A sender that is not a session shows its kind instead, such as `(external)`. After a failed sender lookup it shows `(unknown)`.
+
+A task adds a blank line and `Answer with the a2a reply tool and this messageId.`
+
+The state file `$XDG_STATE_HOME/a2a/codex-threads.json` (mode `0600`) lists the threads with activity in the last 7 days: id, name, cwd, and last activity. After a restart the adapter registers them again, so an unloaded thread stays reachable. The adapter writes it to a temp file and renames it, and drops older entries on each write. A corrupt file is logged once and written new.
 
 ## Build
 
