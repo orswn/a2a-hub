@@ -223,7 +223,7 @@ describe("hub link API", () => {
 		await helper.update(task.id, { state: "completed", text: "here you go" });
 		const update = await asker.next("update", (data) => data["taskId"] === task.id);
 		expect(update.data).toMatchObject({ state: "completed", kind: "result", text: "here you go" });
-		const thread = await asker.ok("GET", `/link/${asker.agent}/thread/${task.contextId.slice(0, 12)}`);
+		const thread = await asker.ok("GET", `/link/${asker.agent}/thread/${task.contextId.slice(0, -1)}`);
 		expect((thread["messages"] as { direction: string; text: string }[]).map((m) => [m.direction, m.text])).toEqual([
 			["out", "please help"],
 			["in", "here you go"],
@@ -236,7 +236,7 @@ describe("hub link API", () => {
 				to: { agent: asker.agent, name: "asker" },
 			}),
 		]);
-		const one = await asker.ok("GET", `/link/${asker.agent}/message/${String(update.data["messageId"]).slice(0, 20)}`);
+		const one = await asker.ok("GET", `/link/${asker.agent}/message/${String(update.data["messageId"]).slice(0, -1)}`);
 		expect(one["text"]).toBe("here you go");
 		expect(await asker.ok("GET", `/link/${asker.agent}/pending`)).toEqual({ expectReply: [], tasks: [] });
 	});

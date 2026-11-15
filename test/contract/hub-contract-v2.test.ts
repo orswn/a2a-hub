@@ -176,13 +176,13 @@ describe("hub link contract for protocol 2 clients", () => {
 		);
 
 		const messageId = String(done.data["messageId"]);
-		expect(await ok("GET", `/link/${alpha}/message/${messageId.slice(0, 12)}`)).toMatchObject({
+		expect(await ok("GET", `/link/${alpha}/message/${messageId.slice(0, -1)}`)).toMatchObject({
 			messageId,
 			text: "done",
 			from: { agent: beta, kind: "session" },
 		});
 		expect(await ok("POST", `/link/${alpha}/read`, { ids: [messageId] })).toEqual({ read: 1 });
-		const thread = await ok("GET", `/link/${alpha}/thread/${task.contextId.slice(0, 12)}`);
+		const thread = await ok("GET", `/link/${alpha}/thread/${task.contextId.slice(0, -1)}`);
 		const items = thread["messages"] as { text: string; from: { kind: string } }[];
 		expect(items.map((item) => item.text)).toEqual(expect.arrayContaining(["review", "done"]));
 		expect(new Set(items.map((item) => item.from.kind))).toEqual(new Set(["session"]));
