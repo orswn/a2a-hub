@@ -238,4 +238,50 @@ describe("hub A2A face", () => {
 		expect(patch.error.code).toBe(-32001);
 		expect((await rpc({ ...bearer(PEER_TOKEN), "A2A-Version": "1.0" }, "@nobody")).status).toBe(404);
 	});
+
+	it("sends a comment heartbeat on an A2A stream while the task waits", async () => {
+		const quick = await startHubProcess({
+			dataDir: `${tmp.dir}/heartbeat`,
+			tokensFile: writeTokens(tmp.dir),
+			env: { HUB_HEARTBEAT_MS: "50" },
+		});
+		const idle = new LinkClient(quick.url, "heartbeat-agent");
+		const abort = new AbortController();
+		try {
+			await idle.register({ name: "idle" });
+			const response = await fetch(`${quick.url}/a2a/${idle.agent}`, {
+				method: "POST",
+				headers: {
+					...bearer(PEER_TOKEN),
+					"Content-Type": "application/json",
+					Accept: "text/event-stream",
+					"A2A-Version": "1.0",
+				},
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "SendStreamingMessage",
+					params: { message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: "wait" }] } },
+				}),
+				signal: abort.signal,
+			});
+			expect(response.status).toBe(200);
+			expect(response.headers.get("content-type")).toBe("text/event-stream");
+			const reader = response.body?.pipeThrough(new TextDecoderStream()).getReader();
+			if (!reader) throw new Error("no stream body");
+			let text = "";
+			while (text.split(": hb\n\n").length < 3) {
+				const { value, done } = await reader.read();
+				if (done) throw new Error(`stream ended: ${text}`);
+				text += value;
+			}
+			const frames = text.split("\n\n").filter(Boolean);
+			expect(frames[0]).toMatch(/^data: .*"TASK_STATE_SUBMITTED"/);
+			expect(frames.slice(1, 3)).toEqual([": hb", ": hb"]);
+		} finally {
+			abort.abort();
+			await idle.close();
+			await quick.stop();
+		}
+	});
 });
