@@ -141,6 +141,14 @@ type Handler struct {
 	Builtin Builtin
 	Holds   *HoldLimiter
 	Log     func(line string)
+	// Served knows the session agents that the hub serves through its MCP endpoint. nil means none.
+	Served Served
+}
+
+// Served knows the session agents that an MCP session of the hub serves.
+type Served interface {
+	// Served reports an agent that an MCP session pushes to, and whether its push stream is open.
+	Served(agentID string) (bound, open bool)
 }
 
 var _ a2asrv.RequestHandler = (*Handler)(nil)
@@ -245,14 +253,32 @@ func (h *Handler) startBuiltin(s *sent) {
 }
 
 func (h *Handler) delivery(ctx context.Context, result *engine.SendResult) string {
-	if h.Agent.Kind != engine.KindSession {
+	return Delivery(ctx, h.Engine, h.Agent, result, h.Served)
+}
+
+// Delivery is the delivery state of a send to agent. A session agent that an MCP session serves never acks a
+// push, so a push gives unconfirmed at once and a message with wake never stays queued in its inbox. An external
+// agent gets a message without a task only in its inbox.
+func Delivery(ctx context.Context, e *engine.Engine, target *engine.AgentRow, result *engine.SendResult, served Served) string {
+	if target.Kind != engine.KindSession {
+		if target.Kind == engine.KindExternal && result.Task == nil {
+			return Queued
+		}
 		return Delivered
 	}
-	agent, err := h.Engine.Agent(h.Agent.ID)
+	if served != nil {
+		if bound, open := served.Served(target.ID); bound {
+			if open && result.Meta.Wake != "never" && result.EventSeq != nil {
+				return Unconfirmed
+			}
+			return Queued
+		}
+	}
+	agent, err := e.Agent(target.ID)
 	if err != nil || agent == nil || agent.Online != 1 || result.EventSeq == nil {
 		return Queued
 	}
-	if h.Engine.WaitForAck(ctx, agent.ID, *result.EventSeq, DeliveryWait) {
+	if e.WaitForAck(ctx, agent.ID, *result.EventSeq, DeliveryWait) {
 		return Delivered
 	}
 	return Unconfirmed

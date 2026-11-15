@@ -339,3 +339,61 @@ func TestASendStampsTheDeliveryUnderTheBusURIThatTheRequestUsed(t *testing.T) {
 		})
 	}
 }
+
+type servedSet map[string]bool
+
+func (s servedSet) Served(agentID string) (bool, bool) {
+	open, bound := s[agentID]
+	return bound, open
+}
+
+func TestDeliveryToAnAgentThatAnMCPSessionServesDoesNotWaitForAnAck(t *testing.T) {
+	h := setup(t, "")
+	agent, err := h.engine.RequireAgent("a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(wake string) *engine.SendResult {
+		t.Helper()
+		message := jsonx.NewObject("messageId", h.engine.NewID(), "role", "ROLE_USER", "parts", []any{jsonx.NewObject("text", "x")},
+			"metadata", jsonx.NewObject(engine.BusExtensionURI, jsonx.NewObject("kind", "note", "wake", wake)))
+		result, err := h.engine.Send(engine.SendInput{AgentID: "a1", Caller: hermes, Message: message})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	cases := []struct {
+		name   string
+		served Served
+		wake   string
+		want   string
+	}{
+		{"open push stream", servedSet{"a1": true}, "now", Unconfirmed},
+		{"no push stream", servedSet{"a1": false}, "now", Queued},
+		{"wake never", servedSet{"a1": true}, "never", Queued},
+		{"not served and offline", servedSet{}, "now", Queued},
+		{"no MCP sessions", nil, "now", Queued},
+	}
+	for _, c := range cases {
+		start := time.Now()
+		got := Delivery(context.Background(), h.engine, agent, send(c.wake), c.served)
+		if got != c.want {
+			t.Errorf("%s: delivery = %s, want %s", c.name, got, c.want)
+		}
+		if waited := time.Since(start); waited > DeliveryWait/2 {
+			t.Errorf("%s: waited %v", c.name, waited)
+		}
+	}
+}
+
+func TestDeliveryToAnExternalAgentIsQueuedWhenTheMessageOnlyReachesItsInbox(t *testing.T) {
+	h := setup(t, "")
+	external := &engine.AgentRow{ID: "hermes", Kind: engine.KindExternal}
+	if got := Delivery(context.Background(), h.engine, external, &engine.SendResult{Message: jsonx.NewObject()}, nil); got != Queued {
+		t.Errorf("inbox only = %s", got)
+	}
+	if got := Delivery(context.Background(), h.engine, external, &engine.SendResult{Task: &engine.Task{ID: "t"}}, nil); got != Delivered {
+		t.Errorf("dispatched task = %s", got)
+	}
+}
