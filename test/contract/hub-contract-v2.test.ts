@@ -192,6 +192,6 @@ describe("hub link contract for protocol 2 clients", () => {
 
 	it("tells a protocol 1 client which protocols it accepts", async () => {
 		const old = await call("POST", "/link/register", { agent: alpha, protocol: 1 });
-		expect(old).toEqual({ status: 426, body: { error: "hub protocol 3 required", expected: 3, supported: [2, 3] } });
+		expect(old).toEqual({ status: 426, body: { error: "hub protocol 2 or 3 required", expected: 3, supported: [2, 3] } });
 	});
 });

@@ -22,7 +22,7 @@ What exists now:
 
 Every harness session registers as kind `session`. The label `harness` names the harness, such as `pi`, `claude-code`, or `codex`. External A2A agents have kind `external`, and the test agents have kind `builtin`.
 
-`POST /link/register` accepts protocol 3 and protocol 2. Another protocol gets `426` with `expected` (3) and `supported` (`[2,3]`).
+`POST /link/register` accepts protocol 3 and protocol 2. Another protocol gets `426` with the text `hub protocol 2 or 3 required`, `expected` (3), and `supported` (`[2,3]`).
 
 | | Protocol 3 | Protocol 2 |
 |---|---|---|

@@ -1,6 +1,10 @@
 package engine
 
 import (
+	"slices"
+	"strconv"
+	"strings"
+
 	"github.com/orswn/a2a-hub/internal/auth"
 	"github.com/orswn/a2a-hub/internal/jsonx"
 )
@@ -189,9 +193,9 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 		throw(ReasonForbidden, "only host principals may register agents")
 	}
 	protocol, ok := body.Value("protocol").(float64)
-	if !ok || (protocol != LegacyProtocol && protocol != HubProtocol) {
+	if !ok || !slices.ContainsFunc(SupportedProtocols, func(p int) bool { return float64(p) == protocol }) {
 		panic(newError(ReasonUpgrade, UpgradeDetails{Expected: HubProtocol, Supported: SupportedProtocols},
-			"hub protocol %d required", HubProtocol))
+			"hub protocol %s required", protocolList(SupportedProtocols)))
 	}
 	id := requireString(body.Value("agent"), "agent", 128)
 	if !agentIDPattern.MatchString(id) {
@@ -252,6 +256,21 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 
 // withHarness checks that session labels name the harness. A protocol 2 client and a child row may leave it out:
 // they get the harness of protocol 2.
+// protocolList names the protocols as "2 or 3", or as "1, 2, or 3" for three or more.
+func protocolList(protocols []int) string {
+	names := make([]string, len(protocols))
+	for i, protocol := range protocols {
+		names[i] = strconv.Itoa(protocol)
+	}
+	switch len(names) {
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " or " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
+}
+
 func withHarness(labels string, legacy bool) string {
 	obj, _ := mustParse(labels).(*jsonx.Object)
 	if name, _ := obj.String(HarnessLabel); name != "" {

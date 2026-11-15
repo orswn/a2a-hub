@@ -32,8 +32,22 @@ func TestRegisterRefusesAPeerPrincipalAndAWrongProtocol(t *testing.T) {
 	_, err := h.engine.Register(mars, obj("agent", "a1", "protocol", 1))
 	var hubErr *Error
 	if !errors.As(err, &hubErr) || hubErr.Reason != ReasonUpgrade || hubErr.Status != 426 || jsonOf(t, hubErr.Details) != `{"expected":3,"supported":[2,3]}` ||
-		hubErr.Error() != "hub protocol 3 required" {
+		hubErr.Error() != "hub protocol 2 or 3 required" {
 		t.Errorf("protocol 1 = %v", err)
+	}
+	for _, protocol := range []any{2.5, 4, "3", nil} {
+		if r := got(h.engine.Register(mars, obj("agent", "a1", "protocol", protocol))).reason(t); r != ReasonUpgrade {
+			t.Errorf("protocol %v = %q", protocol, r)
+		}
+	}
+}
+
+func TestProtocolListNamesEachProtocol(t *testing.T) {
+	cases := map[string][]int{"3": {3}, "2 or 3": {2, 3}, "1, 2, or 3": {1, 2, 3}}
+	for want, protocols := range cases {
+		if got := protocolList(protocols); got != want {
+			t.Errorf("%v = %q, want %q", protocols, got, want)
+		}
 	}
 }
 
