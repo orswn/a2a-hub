@@ -144,11 +144,11 @@ describe("hub link contract for protocol 2 clients", () => {
 		betaLink = await stream(beta);
 		expect(await ok("GET", `/agents/${alpha}`)).toMatchObject({
 			kind: "session",
-			labels: { team: "core", harness: "pi" },
+			labels: { team: "core", harness: LEGACY.harness },
 		});
 		await ok("POST", `/link/${alpha}/children`, { id: kid, name: "kid", labels: {} });
 		await ok("POST", "/link/register", { agent: kid, parent: alpha, protocol: LEGACY.protocol });
-		expect(await ok("GET", `/agents/${kid}`)).toMatchObject({ parent: alpha, labels: { harness: "pi" } });
+		expect(await ok("GET", `/agents/${kid}`)).toMatchObject({ parent: alpha, labels: { harness: LEGACY.harness } });
 		const listed = (await ok("GET", "/agents"))["agents"] as { id: string }[];
 		expect(listed.map((agent) => agent.id)).toEqual(expect.arrayContaining([alpha, beta]));
 	});

@@ -18,6 +18,8 @@ export const LEGACY = {
 	protocol: 2,
 	busUri: "https://github.com/orswn/pimon/a2a/bus/v1",
 	agentHeader: "X-Pimon-Agent",
+	/** The harness label that the hub gives a protocol 2 session. */
+	harness: "pi",
 } as const;
 export const HOST_TOKEN = "mars-token";
 export const OTHER_HOST_TOKEN = "venus-token";

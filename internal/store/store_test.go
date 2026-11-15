@@ -133,7 +133,7 @@ func TestUpgradesVersion1AndKeepsRows(t *testing.T) {
 	if got := tables(t, db); !reflect.DeepEqual(got, allTables) {
 		t.Errorf("tables = %q", got)
 	}
-	if got := scalar[string](t, db, "SELECT id || ',' || kind || ',' || name || ',' || labels FROM agents"); got != `a1,session,bee,{"harness":"pi"}` {
+	if got := scalar[string](t, db, "SELECT id || ',' || kind || ',' || name || ',' || labels FROM agents"); got != `a1,session,bee,{`+legacyHarness+`}` {
 		t.Errorf("agent = %s", got)
 	}
 	if err := Migrate(context.Background(), db, Migrations); err != nil {
@@ -190,8 +190,11 @@ func openAt(t *testing.T, version int) *sql.DB {
 	return rawOpen(t, filepath.Join(dir, FileName))
 }
 
-// legacyKind is the kind of a session agent in schema 2.
-const legacyKind = "pi"
+// legacyKind is the kind of a session agent in schema 2. Schema 3 keeps it as the harness label.
+const (
+	legacyKind    = "pi"
+	legacyHarness = `"harness":"` + legacyKind + `"`
+)
 
 // agentsWithSessionKind rebuilds the agents table of schema 2.
 var agentsWithSessionKind = Migrations[2].SQL
@@ -419,7 +422,7 @@ func checkNodeDatabase(t *testing.T, dir string) {
 		}
 	}
 	expectColumn(t, db, "SELECT id || ' ' || kind || ' ' || labels FROM agents ORDER BY id",
-		`a1 session {"team":"core","harness":"pi"}`, `a2 session {"harness":"pi"}`, "hermes external {}")
+		`a1 session {"team":"core",`+legacyHarness+`}`, `a2 session {`+legacyHarness+`}`, "hermes external {}")
 	expectColumn(t, db, "SELECT sender_kind FROM messages ORDER BY seq", "session", "session")
 	const payload = `{"from":{"agent":"a1","name":"alpha","kind":"session"},"text":"hi"}`
 	expectColumn(t, db, "SELECT payload FROM link_events ORDER BY seq", payload, payload, payload)
@@ -495,10 +498,10 @@ func TestMigrationMapsThePiKindToSessionInEveryTable(t *testing.T) {
 		t.Errorf("user_version = %d, want 3", got)
 	}
 	expectColumn(t, db, "SELECT id || ' ' || kind || ' ' || coalesce(host, '-') || ' ' || coalesce(parent, '-') || ' ' || labels || ' ' || online || ephemeral FROM agents ORDER BY rowid",
-		`lead session mars - {"team":"core","harness":"pi"} 10`,
-		`kid session mars lead {"harness":"pi"} 01`,
+		`lead session mars - {"team":"core",`+legacyHarness+`} 10`,
+		`kid session mars lead {`+legacyHarness+`} 01`,
 		`claude session terra - {"harness":"claude-code"} 10`,
-		`blank session terra - {"harness":"pi"} 00`,
+		`blank session terra - {`+legacyHarness+`} 00`,
 		"hermes external - - {} 00",
 		"tck builtin - - {} 10")
 	expectColumn(t, db, "SELECT id || ' ' || sender_kind FROM messages ORDER BY seq",
