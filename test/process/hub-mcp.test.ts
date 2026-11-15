@@ -255,7 +255,7 @@ describe("hub MCP endpoint", () => {
 		const notification = await until("channel notification", () => claude.frames.find((f) => f["method"]));
 		expect(notification).toMatchObject({
 			method: "notifications/claude/channel",
-			params: { content: "codex-019a00: look at the build", meta: { sender_kind: "session", kind: "task" } },
+			params: { content: "codex-00c0de: look at the build", meta: { sender_kind: "session", kind: "task" } },
 		});
 		const stored = await codex.call("send", { target: "id:claude-mars-777-1", text: "later", wake: "never" }, meta);
 		expect(stored.text).toContain("queued: claude-9c0ffe (id:claude-mars-777-1, stored in the hub inbox of claude-9c0ffe)");
@@ -287,7 +287,7 @@ describe("hub MCP endpoint", () => {
 		const event = bee.next("message", (data) => data["text"] === "hello bee");
 		await codex.call("send", { target: "bee", text: "hello bee" }, meta);
 		const message = await event;
-		expect(message.data).toMatchObject({ from: { agent: meta.threadId, name: "codex-019a00", kind: "session" } });
+		expect(message.data).toMatchObject({ from: { agent: meta.threadId, name: "codex-0000aa", kind: "session" } });
 	});
 
 	it("routes a reply to a Hermes send back through the signed webhook with the send origin", async () => {

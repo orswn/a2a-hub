@@ -102,7 +102,7 @@ func (s *Server) selfFor(sess *session, meta *jsonx.Object) (*engine.AgentRow, e
 	}
 	if row == nil {
 		body := jsonx.NewObject("agent", thread, "protocol", float64(engine.HubProtocol),
-			"labels", jsonx.NewObject(engine.HarnessLabel, HarnessCodex), "name", "codex-"+jsonx.Slice(thread, 6))
+			"labels", jsonx.NewObject(engine.HarnessLabel, HarnessCodex), "name", codexName(thread))
 		if sess.cwd != "" {
 			body.Set("cwd", sess.cwd)
 		}
@@ -665,4 +665,13 @@ func (s *Server) peers(c *call) (string, error) {
 		out[i] = describeAgent(agent)
 	}
 	return strings.Join(out, "\n"), nil
+}
+
+// codexName takes the end of the thread id: Codex thread ids are UUIDv7, so their start is a shared time prefix.
+func codexName(thread string) string {
+	short := strings.ReplaceAll(thread, "-", "")
+	if len(short) > 6 {
+		short = short[len(short)-6:]
+	}
+	return "codex-" + short
 }

@@ -12,6 +12,10 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 - The Codex adapter: it links each Codex thread to the hub, maps its status, and wakes it with `turn/start`. It takes only user threads, as Codex does: no ephemeral, sub-agent, or internal threads. A state file keeps the threads of the last 7 days across restarts. A new thread without a rollout is woken with `turn/start` alone. A thread is named `codex-<last 6 hex digits of the thread id>`.
 - The systemd user units `a2a-codex-server.service` and `a2a-codex.service` in `deploy/systemd/`. `a2a codex-server --mcp-transport stdio` runs the hub MCP server through `a2a mcp`.
 
+### Fixed
+
+- `/mcp` names a Codex thread that it registers by the last 6 hex digits of the thread id, as the adapter does. Codex thread ids are UUIDv7, so their first digits are a time prefix that many threads share.
+
 ## [1.2.0] - 2026-11-15
 
 ### Added

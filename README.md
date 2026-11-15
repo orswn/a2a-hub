@@ -59,7 +59,7 @@ Planned:
 How each harness binds to an agent:
 
 - `claude-code`: `initialize` registers the `session` agent of `X-A2A-Agent` with `harness` `claude-code` on the host of the token. Its name is `claude-<first 6 hex digits of X-A2A-Session>`, or `claude-<pid>` for an agent id of the form `claude-<host>-<pid>-<n>`. It keeps the name of its first register. The `GET` stream of the session owns the presence of the agent, with the link grace. A newer session of the same agent takes over the stream.
-- `codex`: each `tools/call` acts for the agent whose id is `_meta.threadId`. The hub registers an unknown thread as an offline `session` agent with `harness` `codex`. The Codex adapter registers the same id over the link API and owns presence and wakes. The MCP session has no `GET` stream.
+- `codex`: each `tools/call` acts for the agent whose id is `_meta.threadId`. The hub registers an unknown thread as an offline `session` agent with `harness` `codex`, named `codex-<last 6 hex digits of the thread id>`. The Codex adapter registers the same id over the link API and owns presence and wakes. The MCP session has no `GET` stream.
 - `hermes`: the session acts for the external agent whose id is the token principal. It has no `GET` stream.
 
 Tools: `send`, `reply`, `inbox`, `set_status`, and `peers`. A `hermes` session also gets `send.wait` (0 to 30 s): it blocks until the first reply, answer, result, or final task state, returns it, and marks it read. Claude Code and Codex get each reply as a push or a wake, so their `send` refuses `wait`. `send` of a `hermes` session also takes `origin` `{platform, chat_id, thread_id}` and stores it with the message. `internal/mcp/testdata/model-visible.txt` records the model-visible text of each harness and its char counts.

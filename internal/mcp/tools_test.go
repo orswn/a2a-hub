@@ -29,7 +29,7 @@ func TestACodexCallRegistersItsThreadAsAnOfflineCodexSession(t *testing.T) {
 	if err != nil || row == nil {
 		t.Fatalf("agent: %v %v", row, err)
 	}
-	if row.Kind != engine.KindSession || row.Online != 0 || row.Name != "codex-01a1db" || row.Labels != `{"harness":"codex"}` ||
+	if row.Kind != engine.KindSession || row.Online != 0 || row.Name != "codex-c848da" || row.Labels != `{"harness":"codex"}` ||
 		row.StatusText != "reading" {
 		t.Errorf("row = %+v", row)
 	}
