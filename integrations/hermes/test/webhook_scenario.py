@@ -21,10 +21,14 @@ HOME_CHAT = "777"
 class FakeTelegram:
     def __init__(self):
         self.sends = []
+        self.failures_left = 0
 
     async def send(self, chat_id, content, reply_to=None, metadata=None):
         from gateway.platforms.base import SendResult
 
+        if self.failures_left:
+            self.failures_left -= 1
+            return SendResult(success=False, error="Bad Request: chat not found")
         self.sends.append({"chat_id": chat_id, "content": content, "metadata": metadata})
         return SendResult(success=True)
 
@@ -104,6 +108,11 @@ async def main():
             ]
             for name, data, key, ts, request_id in cases:
                 out["responses"][name] = await post(session, url, data, vec.headers(key, ts, data, request_id))
+            # One failed Telegram send, then the same delivery id again, then a new id for the same message.
+            retry = body(topic, "done after retry", "m-retry")
+            telegram.failures_left = 1
+            for name, request_id in (("failed", "m-retry"), ("failed_same_id", "m-retry"), ("failed_new_id", "m-retry.r1")):
+                out["responses"][name] = await post(session, url, retry, vec.headers(secret, now, retry, request_id))
             # The fixed vector, with the Hermes clock set 5 s after its timestamp.
             v = vec.vector()
             with mock.patch("gateway.platforms.webhook.time.time", return_value=int(v["timestamp"]) + 5):

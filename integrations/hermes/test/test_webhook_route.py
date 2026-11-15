@@ -96,6 +96,16 @@ def test_repeated_request_id_is_not_delivered_twice(run_hermes, tmp_path):
     assert [s["content"] for s in out["sends"]].count("\u21a9 mars: done in topic") == 1
 
 
+def test_failed_delivery_answers_502_and_only_a_new_request_id_delivers_again(run_hermes, tmp_path):
+    # Hermes records the request id before it delivers, so a retry must use a new id.
+    out = run_route(run_hermes, tmp_path)
+    assert out["responses"]["failed"]["status"] == 502
+    assert out["responses"]["failed_same_id"]["status"] == 200
+    assert out["responses"]["failed_same_id"]["json"]["status"] == "duplicate"
+    assert out["responses"]["failed_new_id"]["json"]["status"] == "delivered"
+    assert [s["content"] for s in out["sends"]].count("\u21a9 mars: done after retry") == 1
+
+
 def test_wrong_signature_and_stale_timestamp_are_rejected(run_hermes, tmp_path):
     out = run_route(run_hermes, tmp_path)
     assert out["responses"]["bad_signature"]["status"] == 401

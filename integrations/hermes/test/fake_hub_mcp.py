@@ -10,8 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SEND_SCHEMA = {
     "type": "object",
-    "properties": {"to": {"type": "string"}, "body": {"type": "string"}},
-    "required": ["to", "body"],
+    "properties": {"target": {"type": "string"}, "text": {"type": "string"}},
+    "required": ["target", "text"],
 }
 PEERS_SCHEMA = {"type": "object", "properties": {}}
 

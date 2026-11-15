@@ -8,9 +8,9 @@ The plugin adds the chat of the current turn to each hub `send` call. Hermes kno
 
 - Hook: `pre_tool_call`. It returns `{"action": "modify", "args": {"origin": ...}}`. Hermes merges these keys into the call arguments before the dispatch.
 - Tool: `mcp__a2a_hub__send` only. Hermes names an MCP tool `mcp__<server>__<tool>` and replaces each char outside `[A-Za-z0-9_]` with `_`. The server name must be `a2a-hub`.
-- Origin: `{"platform": HERMES_SESSION_PLATFORM, "chat_id": HERMES_SESSION_CHAT_ID, "thread_id": HERMES_SESSION_THREAD_ID or null}`, read with `gateway.session_context.get_session_env`.
-- A Telegram forum topic or DM topic gives `thread_id`. A chat without a topic gives `null`.
-- A turn without a platform or chat id sends no `origin`. The hub then pushes to the home channel.
+- Origin: `{"platform": "telegram", "chat_id": HERMES_SESSION_CHAT_ID, "thread_id": HERMES_SESSION_THREAD_ID or null}`, read with `gateway.session_context.get_session_env`.
+- A Telegram forum topic or DM topic gives `thread_id`. The General topic of a forum gives `"1"`. A chat without topics gives `null`.
+- The route delivers to Telegram only. A turn of another platform, or without a chat id, sends no `origin`. The hub then pushes to the home channel.
 - The hook never raises. Hermes blocks the tool call when a `pre_tool_call` hook raises.
 - `origin` is not in the hub tool schema. The model does not see it.
 
@@ -27,6 +27,7 @@ The hub signs each push with the Hermes generic HMAC scheme V2. Hermes checks it
 - Header `X-Webhook-Timestamp`: Unix time in seconds. Hermes rejects a value more than 300 s from its clock.
 - Header `X-Webhook-Signature-V2`: hex HMAC-SHA256 of `<timestamp>.<raw body>` with the route secret.
 - Header `X-Request-ID`: the delivery id. A `deliver_only` route answers a repeated id with `duplicate` for one hour.
+  - Hermes records the id before it delivers. After a `502` (delivery failed), the same id gets `duplicate`. A retry needs a new id.
 - `test/webhook-vector.json` is a fixed vector that Hermes accepts.
 
 The route renders `deliver_extra` from the body. `origin` must be an object of three strings, with `""` for an unknown value:
@@ -61,7 +62,8 @@ HERMES_SRC=/path/to/hermes-agent integrations/hermes/test/run.sh
 ```
 
 - `run.sh` makes a venv from the Hermes `uv.lock` on the first run. `HERMES_TEST_VENV` sets its path.
-- `test_origin_plugin.py`: Hermes loads the plugin and connects to a fake hub MCP server. The test calls the tools through `model_tools.handle_function_call` and reads the arguments on the wire.
-- `test_webhook_route.py`: the real gateway config loader and webhook adapter take signed POSTs. A fake Telegram adapter records each send. The mirror writes into a real `state.db`.
+- `test_origin_plugin.py`: Hermes loads the plugin and connects to a fake hub MCP server. The test calls the tools through `model_tools.handle_function_call`, directly and through the Tool Search bridge `tool_call`, and reads the arguments on the wire.
+  - Each Telegram session comes from `TelegramAdapter._build_message_event`, the path of an inbound message: forum topic, General topic, group, and private chat.
+- `test_webhook_route.py`: the real gateway config loader and webhook adapter take signed POSTs. A fake Telegram adapter records each send and can fail one. The mirror writes into a real `state.db`.
 - `HERMES_MANAGED_CONFIG=<file>` replaces the route config of the webhook test with a rendered managed config. That file must enable the webhook platform and set its port.
 - `make verify` does not run these tests. They need a Hermes source tree and its Python dependencies.
