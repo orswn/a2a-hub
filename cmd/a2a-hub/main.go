@@ -31,7 +31,9 @@ import (
 const (
 	// keepAliveTimeout closes an idle keep-alive connection, as the TypeScript hub does.
 	keepAliveTimeout = 65 * time.Second
-	sweepInterval    = 24 * time.Hour
+	// handlerWait bounds the wait for open requests at a stop, before the engine and the store close.
+	handlerWait   = 2 * time.Second
+	sweepInterval = 24 * time.Hour
 )
 
 // version is set at build time with -ldflags "-X main.version=<version>".
@@ -153,6 +155,9 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 			}
 			if err := <-served; !errors.Is(err, http.ErrServerClosed) {
 				return fmt.Errorf("stop failed: %w", err)
+			}
+			if !hub.WaitHandlers(handlerWait) {
+				log("stop: open requests did not end within " + handlerWait.String())
 			}
 			return nil
 		}

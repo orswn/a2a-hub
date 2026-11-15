@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func get(t *testing.T, base, method, path string) (int, string, string) {
@@ -168,4 +169,36 @@ func (w *panicWriter) WriteHeader(status int) {
 		panic("boom")
 	}
 	w.ResponseWriter.WriteHeader(status)
+}
+
+type heldCounter chan struct{}
+
+func (c heldCounter) OnlineCount() (int64, error) {
+	<-c
+	return 0, nil
+}
+
+func TestWaitHandlersWaitsForAnOpenRequest(t *testing.T) {
+	release := make(heldCounter)
+	s := New(Options{Agents: release})
+	done := make(chan struct{})
+	go func() {
+		s.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.open.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the request did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if s.WaitHandlers(50 * time.Millisecond) {
+		t.Error("WaitHandlers returned true while a request is open")
+	}
+	close(release)
+	<-done
+	if !s.WaitHandlers(time.Second) {
+		t.Error("WaitHandlers returned false after the request ended")
+	}
 }

@@ -57,6 +57,7 @@ type Server struct {
 	tokens atomic.Pointer[auth.TokenTable]
 	agents AgentCounter
 	log    func(line string)
+	open   atomic.Int64
 }
 
 // New makes a Server.
@@ -102,6 +103,8 @@ func (e *httpError) Error() string { return e.message }
 func fail(status int, message string) error { return &httpError{status: status, message: message} }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.open.Add(1)
+	defer s.open.Add(-1)
 	tracked := &trackingWriter{ResponseWriter: w}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -114,6 +117,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := s.handle(tracked, r); err != nil {
 		s.sendError(tracked, err)
 	}
+}
+
+// WaitHandlers waits until no request is open, or until the timeout. It reports whether none is open.
+// http.Server.Close does not wait for the handlers, and they may still call the engine.
+func (s *Server) WaitHandlers(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for s.open.Load() > 0 {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return true
 }
 
 // trackingWriter knows whether the status line went out, so a late error does not write a second one.
