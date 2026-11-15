@@ -28,6 +28,10 @@ const (
 )
 
 // Protocol 2 names. The hub still accepts them while it accepts protocol 2 clients.
+//
+// FIXME(okka): when protocol 2 support ends, remove this block and its uses: the protocol 2 register with its
+// default harness pi, the X-Pimon-Agent header, the pimon bus extension URI on cards, requests, and stored
+// rows, and the status text mark, which is still written under that URI.
 const (
 	LegacyProtocol        = 2
 	LegacyBusExtensionURI = "https://github.com/orswn/pimon/a2a/bus/v1"
