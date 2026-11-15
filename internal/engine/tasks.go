@@ -431,7 +431,7 @@ func (e *Engine) send(input SendInput) *SendResult {
 				throw(ReasonInvalid, "contextId %s does not match task %s", incomingContext, task.ID)
 			}
 			// The external agent starts a new remote task per message, and a busy context would hold it unsent.
-			if agent.Kind == "external" && !IsInterrupted(task.State) {
+			if agent.Kind == KindExternal && !IsInterrupted(task.State) {
 				throw(ReasonInvalid, "Task %s of external agent %s takes a follow-up only when it waits for input", task.ID, agent.Name)
 			}
 			contextID = task.ContextID
@@ -467,7 +467,7 @@ func (e *Engine) send(input SendInput) *SendResult {
 			task = e.taskRow(id)
 			created = true
 		default:
-			if agent.Kind == "external" {
+			if agent.Kind == KindExternal {
 				throw(ReasonInvalid, "external agents take only task, question, or correction messages")
 			}
 			contextID = incomingContext
@@ -490,7 +490,7 @@ func (e *Engine) send(input SendInput) *SendResult {
 		}
 		e.insertInbox(agent.ID, sender, caller, contextID, taskID, meta, stored)
 		storedID, _ := stored.String("messageId")
-		if task != nil && agent.Kind == "external" {
+		if task != nil && agent.Kind == KindExternal {
 			e.queueExternal(task, "send", &storedID)
 		}
 		payload := MessageEvent{
@@ -573,10 +573,10 @@ func truthy(v any) bool {
 // openTaskInContext finds the one interrupted task between the same sender and target in the context. A peer
 // or an external agent cannot carry a hub task id, so its follow-up names only the context.
 func (e *Engine) openTaskInContext(agent *AgentRow, caller Caller, contextID string) *taskRow {
-	if contextID == "" || caller.Principal == auth.Anonymous || agent.Kind == "builtin" {
+	if contextID == "" || caller.Principal == auth.Anonymous || agent.Kind == KindBuiltin {
 		return nil
 	}
-	if caller.Principal.Kind != auth.KindPeer && agent.Kind != "external" {
+	if caller.Principal.Kind != auth.KindPeer && agent.Kind != KindExternal {
 		return nil
 	}
 	var callerAgent *string
@@ -687,7 +687,7 @@ func (e *Engine) applyChange(taskID string, change TaskChange) *Task {
 				if agent.Host == nil {
 					principal.Name = agent.ID
 				}
-				if agent.Kind == "external" {
+				if agent.Kind == KindExternal {
 					principal = auth.Principal{Name: agent.Name, Kind: auth.KindPeer}
 				}
 				e.insertInbox(*task.SenderAgent, Sender{Agent: agent.ID, Name: agent.Name, Kind: agent.Kind},
@@ -805,7 +805,7 @@ func (e *Engine) Cancel(agentID string, caller Caller, id string) (*Task, error)
 			}
 			e.writeStatus(task, StateCanceled, nil)
 			e.emit(task.AgentID, "cancel", CancelEvent{TaskID: task.ID})
-			if agent := e.agent(task.AgentID); agent != nil && agent.Kind == "external" {
+			if agent := e.agent(task.AgentID); agent != nil && agent.Kind == KindExternal {
 				e.run("DELETE FROM external_outbox WHERE task_id = ? AND op = 'send'", task.ID)
 				e.queueExternal(task, "cancel", nil)
 			}

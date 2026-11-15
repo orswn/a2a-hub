@@ -307,8 +307,8 @@ func (e *Engine) Sweep() (SweepResult, error) {
 			removed.Replies, _ = e.run("DELETE FROM expect_reply WHERE settled_at IS NOT NULL AND settled_at < ?", cutoff)
 			offlineCutoff := ISO(e.now() - OfflineTTLMS)
 			var gone []string
-			e.each(`SELECT id FROM agents WHERE kind = 'session' AND online = 0 AND offline_at IS NOT NULL
-				 AND ((ephemeral = 1 AND offline_at < ?) OR offline_at < ?)`, args(ephemeralCutoff, offlineCutoff),
+			e.each(`SELECT id FROM agents WHERE kind = ? AND online = 0 AND offline_at IS NOT NULL
+				 AND ((ephemeral = 1 AND offline_at < ?) OR offline_at < ?)`, args(KindSession, ephemeralCutoff, offlineCutoff),
 				func(scan func(...any)) {
 					var id string
 					scan(&id)

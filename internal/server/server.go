@@ -311,7 +311,7 @@ func (s *Server) resolve(ref string) (*engine.RefResult, error) {
 
 func (s *Server) cardFor(r *http.Request, agent *engine.AgentRow) *jsonx.Object {
 	var external *a2aapi.ExternalCard
-	if s.opts.Externals != nil && agent.Kind == "external" {
+	if s.opts.Externals != nil && agent.Kind == engine.KindExternal {
 		external = s.opts.Externals.Card(agent.ID)
 	}
 	return a2aapi.BuildCard(a2aapi.CardInput{

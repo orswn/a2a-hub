@@ -148,9 +148,9 @@ func (e *Engine) EnsureBuiltin(id, name string) error {
 	return e.do(func() {
 		at := e.iso()
 		e.run(`INSERT INTO agents (id, kind, host, name, online, registered_at, last_seen_at)
-			 VALUES (?, 'builtin', NULL, ?, 1, ?, ?)
-			 ON CONFLICT (id) DO UPDATE SET kind = 'builtin', host = NULL, name = excluded.name, online = 1, offline_at = NULL`,
-			id, name, at, at)
+			 VALUES (?, ?, NULL, ?, 1, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, host = NULL, name = excluded.name, online = 1, offline_at = NULL`,
+			id, KindBuiltin, name, at, at)
 	})
 }
 
@@ -172,7 +172,7 @@ func (e *Engine) EnsureExternal(id, name string) error {
 			}
 			at := e.iso()
 			e.run(`INSERT INTO agents (id, kind, host, name, online, registered_at, offline_at)
-				 VALUES (?, 'external', NULL, ?, 0, ?, ?)`, id, name, at, at)
+				 VALUES (?, ?, NULL, ?, 0, ?, ?)`, id, KindExternal, name, at, at)
 		})
 	})
 }
@@ -251,8 +251,8 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 				 WHERE id = ?`, *name, cwd, role, parent, labels, topics, ephemeral, at, id)
 		} else {
 			e.run(`INSERT INTO agents (id, kind, host, name, cwd, role, parent, labels, topics, ephemeral, online, registered_at, last_seen_at, offline_at)
-				 VALUES (?, 'session', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-				id, principal.Name, *name, cwd, role, parent, labels, topics, ephemeral, at, at, at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+				id, KindSession, principal.Name, *name, cwd, role, parent, labels, topics, ephemeral, at, at, at)
 		}
 		return RegisterResult{Agent: id, Name: *name, Host: principal.Name}
 	})
@@ -342,7 +342,7 @@ func (e *Engine) AddChild(principal auth.Principal, parentID string, body any) (
 				e.run("UPDATE agents SET name = ?, cwd = ?, role = ?, labels = ? WHERE id = ?", name, cwd, role, labels, id)
 			} else {
 				e.run(`INSERT INTO agents (id, kind, host, name, cwd, role, parent, labels, online, registered_at, offline_at)
-					 VALUES (?, 'session', ?, ?, ?, ?, ?, ?, 0, ?, ?)`, id, principal.Name, name, cwd, role, parentID, labels, at, at)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, id, KindSession, principal.Name, name, cwd, role, parentID, labels, at, at)
 			}
 			return RegisterResult{Agent: id, Name: name, Host: principal.Name}
 		})
@@ -360,10 +360,10 @@ func (e *Engine) ResolveRef(ref string) (*RefResult, error) {
 			return nil
 		}
 		name := ref[1:]
-		if fixed := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind IN ('builtin', 'external') ORDER BY id LIMIT 1", name); len(fixed) > 0 {
+		if fixed := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind IN (?, ?) ORDER BY id LIMIT 1", name, KindBuiltin, KindExternal); len(fixed) > 0 {
 			return &RefResult{Agent: fixed[0]}
 		}
-		online := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind = 'session' AND online = 1 ORDER BY last_seen_at DESC, id", name)
+		online := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind = ? AND online = 1 ORDER BY last_seen_at DESC, id", name, KindSession)
 		switch len(online) {
 		case 0:
 			return nil
