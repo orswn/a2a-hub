@@ -68,6 +68,10 @@ type Sender struct {
 	timerAt  int64
 	off      func()
 	stopped  bool
+
+	// runMu covers the read of the due rows and the claim loop, so a delivery that ends in between cannot
+	// leave the in-flight set while a run still holds its stale row.
+	runMu sync.Mutex
 }
 
 // New makes a Sender. Start begins the sending.
@@ -88,7 +92,9 @@ func New(e *engine.Engine, opts Options) *Sender {
 	transport := opts.Transport
 	if transport == nil {
 		dialer := &net.Dialer{Timeout: Timeout}
-		transport = &http.Transport{DialContext: s.guard.DialContext(dialer), ForceAttemptHTTP2: true}
+		transport = &http.Transport{
+			DialContext: s.guard.DialContext(dialer), ForceAttemptHTTP2: true, IdleConnTimeout: 90 * time.Second,
+		}
 	}
 	s.client = &http.Client{
 		Transport: transport,
@@ -107,8 +113,8 @@ func (s *Sender) Start() {
 	s.schedule(s.now())
 }
 
-// Stop ends the sending and waits for the open attempts, which it aborts. A row of an aborted attempt stays as it
-// was and is sent again after a restart.
+// Stop ends the sending and waits for a running run and for the open attempts, which it aborts. A row of an
+// aborted attempt stays as it was and is sent again after a restart.
 func (s *Sender) Stop() {
 	s.mu.Lock()
 	s.stopped = true
@@ -143,7 +149,13 @@ func (s *Sender) schedule(at int64) {
 		}
 		s.timer = nil
 		s.timerAt = math.MaxInt64
+		if s.stopped {
+			s.mu.Unlock()
+			return
+		}
+		s.wg.Add(1)
 		s.mu.Unlock()
+		defer s.wg.Done()
 		s.Run()
 	})
 	s.timer = timer
@@ -158,10 +170,30 @@ func (s *Sender) Run() {
 	}
 	open := len(s.inFlight)
 	s.mu.Unlock()
-	due, err := s.engine.DuePushes(s.now(), batch+open)
+	if !s.claim(open) {
+		return
+	}
+	next, ok, err := s.engine.NextPushAt()
 	if err != nil {
 		s.log("push run failed: " + err.Error())
 		return
+	}
+	s.mu.Lock()
+	idle := len(s.inFlight) == 0
+	s.mu.Unlock()
+	if ok && idle {
+		s.schedule(next)
+	}
+}
+
+// claim starts a delivery for each due row that is not in flight. It reports false when the read failed.
+func (s *Sender) claim(open int) bool {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	due, err := s.engine.DuePushes(s.now(), batch+open)
+	if err != nil {
+		s.log("push run failed: " + err.Error())
+		return false
 	}
 	for _, item := range due {
 		s.mu.Lock()
@@ -177,23 +209,15 @@ func (s *Sender) Run() {
 			if _, err := s.Deliver(item); err != nil {
 				s.log(fmt.Sprintf("push %d failed: %v", item.ID, err))
 			}
+			s.runMu.Lock()
 			s.mu.Lock()
 			delete(s.inFlight, item.ID)
 			s.mu.Unlock()
+			s.runMu.Unlock()
 			s.schedule(s.now())
 		}()
 	}
-	next, ok, err := s.engine.NextPushAt()
-	if err != nil {
-		s.log("push run failed: " + err.Error())
-		return
-	}
-	s.mu.Lock()
-	idle := len(s.inFlight) == 0
-	s.mu.Unlock()
-	if ok && idle {
-		s.schedule(next)
-	}
+	return true
 }
 
 // Deliver makes one attempt and reports whether the webhook answered 2xx. The address check runs before each

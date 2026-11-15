@@ -437,3 +437,44 @@ func TestStartSendsQueuedRowsAndStopWaitsForTheOpenAttempts(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestStopWaitsForARunThatATimerStarted(t *testing.T) {
+	p := setup(t, nil)
+	var armed atomic.Bool
+	var once sync.Once
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	p.sender = New(p.engine, Options{Guard: mustGuard(t, nil), Now: func() int64 {
+		if armed.Load() {
+			once.Do(func() {
+				close(entered)
+				<-release
+			})
+		}
+		return p.now()
+	}})
+	p.sender.schedule(p.now() + 50)
+	armed.Store(true)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the timer did not start a run")
+	}
+	stopped := make(chan struct{})
+	go func() {
+		p.sender.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		close(release)
+		t.Fatal("Stop returned while a run was open")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop did not return after the run ended")
+	}
+}
