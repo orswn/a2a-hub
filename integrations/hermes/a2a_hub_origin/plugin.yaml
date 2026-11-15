@@ -1,0 +1,6 @@
+name: a2a_hub_origin
+version: 1.0.0
+description: Adds the chat origin of the current turn to each send call of the a2a-hub MCP server.
+author: orswn
+provides_hooks:
+  - pre_tool_call

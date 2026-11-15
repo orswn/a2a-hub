@@ -32,6 +32,7 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 - `protocol/`: TypeBox source, constants, route manifest, generator, and the committed JSON Schema of the link protocol.
 - `test/`: TypeScript workspace with the black-box contract and process suites.
 - `scripts/`: `tck-gate.py` and `hub-python-client.py` for the conformance job.
+- `integrations/hermes/`: the Hermes plugin `a2a_hub_origin` and its tests against a Hermes source tree (`test/run.sh`, not in `make verify`).
 
 ## Code rules
 
