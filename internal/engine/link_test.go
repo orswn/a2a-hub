@@ -171,3 +171,28 @@ func TestOpenLinkDeliversEveryLaterEventToAnOpenSubscriber(t *testing.T) {
 		t.Error("Events is open after Close")
 	}
 }
+
+func TestALinkThatFallsMoreThanTheBufferBehindCloses(t *testing.T) {
+	sub := &linkSub{wake: make(chan struct{}, 1), done: make(chan struct{}), out: make(chan LinkEvent)}
+	go sub.pump()
+	defer close(sub.done)
+	for i := range LinkBufferMax + 2 {
+		sub.push(LinkEvent{Seq: int64(i) + 1, Type: "message"})
+	}
+	timeout := time.After(10 * time.Second)
+	read := 0
+	for {
+		select {
+		case _, ok := <-sub.out:
+			if !ok {
+				if read > 1 {
+					t.Errorf("read %d events before the close", read)
+				}
+				return
+			}
+			read++
+		case <-timeout:
+			t.Fatalf("the subscription is still open after %d events", read)
+		}
+	}
+}

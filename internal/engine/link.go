@@ -69,7 +69,8 @@ func (e *Engine) Replay(agentID string, afterSeq *int64) ([]LinkEvent, error) {
 type Link struct {
 	// Replay holds the unacked events at the time of the open.
 	Replay []LinkEvent
-	// Events gives each later event of the agent once, in seq order. It closes after Close.
+	// Events gives each later event of the agent once, in seq order. It closes after Close, and when more than
+	// LinkBufferMax events wait for the reader. The client then reconnects and gets them in its replay.
 	Events <-chan LinkEvent
 	close  func()
 }
@@ -106,18 +107,27 @@ func (e *Engine) OpenLink(agentID string, afterSeq *int64) (*Link, error) {
 	return link, nil
 }
 
+// LinkBufferMax is the most events that one link subscription holds for a slow reader.
+const LinkBufferMax = 10_000
+
 type linkSub struct {
-	mu   sync.Mutex
-	buf  []LinkEvent
-	wake chan struct{}
-	done chan struct{}
-	out  chan LinkEvent
+	mu       sync.Mutex
+	buf      []LinkEvent
+	overflow bool
+	wake     chan struct{}
+	done     chan struct{}
+	out      chan LinkEvent
 }
 
 // push never blocks, so a slow stream cannot hold up the listeners of other agents.
 func (s *linkSub) push(event LinkEvent) {
 	s.mu.Lock()
-	s.buf = append(s.buf, event)
+	if len(s.buf) >= LinkBufferMax {
+		s.overflow = true
+		s.buf = nil
+	} else if !s.overflow {
+		s.buf = append(s.buf, event)
+	}
 	s.mu.Unlock()
 	select {
 	case s.wake <- struct{}{}:
@@ -129,6 +139,10 @@ func (s *linkSub) pump() {
 	defer close(s.out)
 	for {
 		s.mu.Lock()
+		if s.overflow {
+			s.mu.Unlock()
+			return
+		}
 		if len(s.buf) == 0 {
 			s.mu.Unlock()
 			select {
