@@ -32,13 +32,15 @@ def free_port():
 def run_route(run_hermes, tmp_path):
     managed = tmp_path / "managed" / "config.yaml"
     override = os.environ.get("HERMES_MANAGED_CONFIG")
+    env = {}
     if override:
+        # A rendered managed config enables the platform and sets its port itself.
         shutil.copyfile(override, managed)
     else:
         managed.write_text(MANAGED_CONFIG, encoding="utf-8")
+        env = {"WEBHOOK_ENABLED": "true", "WEBHOOK_PORT": str(free_port())}
     return run_hermes("webhook_scenario.py", env={
-        "WEBHOOK_ENABLED": "true",
-        "WEBHOOK_PORT": str(free_port()),
+        **env,
         "WEBHOOK_SECRET": vec.SECRET,
         "TELEGRAM_BOT_TOKEN": "123456789:AAtest-token-not-real-0000000000000",
         "TELEGRAM_HOME_CHANNEL": "777",

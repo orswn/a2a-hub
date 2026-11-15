@@ -10,7 +10,7 @@ The plugin adds the chat of the current turn to each hub `send` call. Hermes kno
 - Tool: `mcp__a2a_hub__send` only. Hermes names an MCP tool `mcp__<server>__<tool>` and replaces each char outside `[A-Za-z0-9_]` with `_`. The server name must be `a2a-hub`.
 - Origin: `{"platform": HERMES_SESSION_PLATFORM, "chat_id": HERMES_SESSION_CHAT_ID, "thread_id": HERMES_SESSION_THREAD_ID or null}`, read with `gateway.session_context.get_session_env`.
 - A Telegram forum topic or DM topic gives `thread_id`. A chat without a topic gives `null`.
-- A turn without a platform or chat (WebUI, CLI, cron) sends no `origin`. The hub then pushes to the home channel.
+- A turn without a platform or chat id sends no `origin`. The hub then pushes to the home channel.
 - The hook never raises. Hermes blocks the tool call when a `pre_tool_call` hook raises.
 - `origin` is not in the hub tool schema. The model does not see it.
 
@@ -63,5 +63,5 @@ HERMES_SRC=/path/to/hermes-agent integrations/hermes/test/run.sh
 - `run.sh` makes a venv from the Hermes `uv.lock` on the first run. `HERMES_TEST_VENV` sets its path.
 - `test_origin_plugin.py`: Hermes loads the plugin and connects to a fake hub MCP server. The test calls the tools through `model_tools.handle_function_call` and reads the arguments on the wire.
 - `test_webhook_route.py`: the real gateway config loader and webhook adapter take signed POSTs. A fake Telegram adapter records each send. The mirror writes into a real `state.db`.
-- `HERMES_MANAGED_CONFIG=<file>` replaces the route config of the webhook test with a rendered managed config.
+- `HERMES_MANAGED_CONFIG=<file>` replaces the route config of the webhook test with a rendered managed config. That file must enable the webhook platform and set its port.
 - `make verify` does not run these tests. They need a Hermes source tree and its Python dependencies.
