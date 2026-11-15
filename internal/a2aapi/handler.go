@@ -37,7 +37,13 @@ const (
 	Failed      = "failed"
 )
 
-var busExtension = &a2a.AgentExtension{URI: engine.BusExtensionURI}
+var busExtensions = func() []*a2a.AgentExtension {
+	out := make([]*a2a.AgentExtension, len(engine.BusExtensionURIs))
+	for i, uri := range engine.BusExtensionURIs {
+		out[i] = &a2a.AgentExtension{URI: uri}
+	}
+	return out
+}()
 
 // ToA2AError maps a hub error to an A2A error. Other errors pass unchanged.
 func ToA2AError(err error) error {
@@ -158,10 +164,40 @@ func (h *Handler) publicError(err error) error {
 
 func (h *Handler) hold() (func(), error) { return h.Holds.Acquire(h.Caller.Principal.Name) }
 
+// activate activates each bus extension URI that the request names in A2A-Extensions.
 func activate(ctx context.Context) {
-	if extensions, ok := a2asrv.ExtensionsFrom(ctx); ok && extensions.Requested(busExtension) {
-		extensions.Activate(busExtension)
+	extensions, ok := a2asrv.ExtensionsFrom(ctx)
+	if !ok {
+		return
 	}
+	for _, extension := range busExtensions {
+		if extensions.Requested(extension) {
+			extensions.Activate(extension)
+		}
+	}
+}
+
+// busURI is the bus extension URI of the answer: the one that the message metadata uses, else the one of the
+// request metadata.
+func busURI(req *a2a.SendMessageRequest) string {
+	if req.Message != nil {
+		if uri := busKey(req.Message.Metadata); uri != "" {
+			return uri
+		}
+	}
+	if uri := busKey(req.Metadata); uri != "" {
+		return uri
+	}
+	return engine.BusExtensionURI
+}
+
+func busKey(metadata map[string]any) string {
+	for _, uri := range engine.BusExtensionURIs {
+		if _, ok := metadata[uri]; ok {
+			return uri
+		}
+	}
+	return ""
 }
 
 type sent struct {
@@ -209,7 +245,7 @@ func (h *Handler) startBuiltin(s *sent) {
 }
 
 func (h *Handler) delivery(ctx context.Context, result *engine.SendResult) string {
-	if h.Agent.Kind != "pi" {
+	if h.Agent.Kind != engine.KindSession {
 		return Delivered
 	}
 	agent, err := h.Engine.Agent(h.Agent.ID)
@@ -223,16 +259,16 @@ func (h *Handler) delivery(ctx context.Context, result *engine.SendResult) strin
 }
 
 func requestsDeliveryWait(metadata map[string]any) bool {
-	meta, ok := metadata[engine.BusExtensionURI].(map[string]any)
+	meta, ok := metadata[busKey(metadata)].(map[string]any)
 	return ok && meta["deliveryWait"] == true
 }
 
-func stamp(metadata *jsonx.Object, delivery string) *jsonx.Object {
+func stamp(metadata *jsonx.Object, uri, delivery string) *jsonx.Object {
 	out := metadata.Clone()
 	if out == nil {
 		out = jsonx.NewObject()
 	}
-	out.Set(engine.BusExtensionURI, jsonx.NewObject("delivery", delivery))
+	out.Set(uri, jsonx.NewObject("delivery", delivery))
 	return out
 }
 
@@ -295,7 +331,7 @@ func (h *Handler) sendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 		reply := result.Message
 		if delivery != "" {
 			reply = reply.Clone()
-			reply.Set("metadata", stamp(objectOf(reply.Value("metadata")), delivery))
+			reply.Set("metadata", stamp(objectOf(reply.Value("metadata")), busURI(req), delivery))
 		}
 		return fromWire[a2a.Message](reply)
 	}
@@ -305,7 +341,7 @@ func (h *Handler) sendMessage(ctx context.Context, req *a2a.SendMessageRequest) 
 	}
 	if delivery != "" {
 		copied := *task
-		copied.Metadata = stamp(task.Metadata, delivery)
+		copied.Metadata = stamp(task.Metadata, busURI(req), delivery)
 		task = &copied
 	}
 	return taskFromWire(task)

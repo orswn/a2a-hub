@@ -19,11 +19,35 @@ import (
 
 // Protocol constants shared with the clients.
 const (
-	HubProtocol     = 2
-	BusExtensionURI = "https://github.com/orswn/pimon/a2a/bus/v1"
-	AgentHeader     = "x-pimon-agent"
+	HubProtocol     = 3
+	BusExtensionURI = "https://github.com/orswn/a2a-hub/bus/v1"
+	AgentHeader     = "x-a2a-agent"
 	StatusTextMax   = 160
+	// HarnessLabel is the label that names the harness of a session agent, such as pi or codex.
+	HarnessLabel = "harness"
 )
+
+// Protocol 2 names. The hub still accepts them while it accepts protocol 2 clients.
+const (
+	LegacyProtocol        = 2
+	LegacyBusExtensionURI = "https://github.com/orswn/pimon/a2a/bus/v1"
+	LegacyAgentHeader     = "x-pimon-agent"
+	// LegacyHarness is the harness of every protocol 2 client.
+	LegacyHarness = "pi"
+)
+
+// SupportedProtocols lists the link protocols that register accepts.
+var SupportedProtocols = []int{LegacyProtocol, HubProtocol}
+
+// The agent kinds.
+const (
+	KindSession  = "session"
+	KindExternal = "external"
+	KindBuiltin  = "builtin"
+)
+
+// BusExtensionURIs lists the bus extension URIs that the hub reads, the current one first.
+var BusExtensionURIs = []string{BusExtensionURI, LegacyBusExtensionURI}
 
 // BusKinds lists the message kinds of the bus extension.
 var BusKinds = []string{"note", "question", "answer", "task", "result", "correction", "status", "event"}
@@ -329,7 +353,7 @@ func ParseBusMetadata(metadata any) (Meta, error) {
 
 func parseBusMetadata(metadata any) Meta {
 	obj, _ := metadata.(*jsonx.Object)
-	raw := obj.Value(BusExtensionURI)
+	_, raw := BusEntry(obj)
 	if raw == nil || jsonx.IsNull(raw) {
 		return Meta{Kind: "task", Wake: "now"}
 	}
@@ -363,6 +387,17 @@ func parseBusMetadata(metadata any) Meta {
 	}
 	meta.Data = value.Value("data")
 	return meta
+}
+
+// BusEntry gives the bus extension URI that a metadata object uses and its value. The current URI wins over
+// the protocol 2 URI. An object without either gives "" and nil.
+func BusEntry(metadata *jsonx.Object) (string, any) {
+	for _, uri := range BusExtensionURIs {
+		if value := metadata.Value(uri); value != nil {
+			return uri, value
+		}
+	}
+	return "", nil
 }
 
 // orDefault is the ?? operator: null and undefined give the default.

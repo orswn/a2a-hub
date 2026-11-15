@@ -1,8 +1,8 @@
 // Runs the database compatibility scenario with the TypeScript hub engine, or reads a database back with it.
 // Usage: node compat.mjs write <pimon checkout> <data dir>
 //        node compat.mjs read <pimon checkout> <data dir>
-// compat_test.go runs the same scenario through the Go engine. Both must write the same rows, and each
-// engine must read the same JSON from either file.
+// compat_test.go runs the same scenario through the Go engine. After the Go hub migrates this file, both
+// files must hold the same rows, and the Go engine must read the same JSON from either file.
 // The committed compat-node files were made with this script from pimon 1cb229e and Node 24.14.0:
 // "write" into compat-node, then "read" of a copy into compat-node/reads.json.
 import { join } from "node:path";

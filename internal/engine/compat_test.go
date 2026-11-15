@@ -15,9 +15,9 @@ import (
 	"github.com/orswn/a2a-hub/internal/store"
 )
 
-// The TypeScript hub must open a file that the Go hub wrote and the reverse. The scenario in
-// testdata/compat.mjs runs here through the Go engine with the same clock and ids. Both files must hold
-// the same rows, and both engines must read the same JSON from either file.
+// The Go hub must open a file that the TypeScript hub wrote. The scenario in testdata/compat.mjs runs here
+// through the Go engine with the same clock and ids. After the schema 3 migration both files must hold the same
+// rows, and the Go engine must read the same JSON from either file.
 //
 // testdata/compat-node holds the file and the reads that the TypeScript hub made, so the test runs without
 // a pimon checkout. With PIMON_DIR it also runs the TypeScript side again.
@@ -37,7 +37,7 @@ func (h *testEnv) close() {
 func runCompatScenario(t *testing.T, dir string) {
 	h := setupAt(t, dir, compatStart, Options{})
 	e := h.engine
-	bus := string(jsonx.Stringify(BusExtensionURI))
+	bus := string(jsonx.Stringify(LegacyBusExtensionURI))
 	askerCaller := Caller{Principal: mars, Agent: "asker"}
 	helper := Caller{Principal: mars, Agent: "helper"}
 
@@ -302,15 +302,46 @@ func TestGoWritesTheSameRowsAsTheTypeScriptEngine(t *testing.T) {
 	diffText(t, "rows", dumpRows(t, dir), dumpRows(t, copyDir(t, compatNode)))
 }
 
+// sessionReads maps the reads of the TypeScript hub to schema 3: each agent and sender of kind pi is a session,
+// and each such agent has the harness label of protocol 2.
+func sessionReads(t *testing.T, reads string) string {
+	t.Helper()
+	value, err := jsonx.ParseString(reads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case []any:
+			for _, item := range v {
+				walk(item)
+			}
+		case *jsonx.Object:
+			if kind, _ := v.String("kind"); kind == LegacyHarness {
+				v.Set("kind", KindSession)
+				if labels, ok := v.Object("labels"); ok {
+					labels.Set(HarnessLabel, LegacyHarness)
+				}
+			}
+			for _, key := range v.Keys() {
+				walk(v.Value(key))
+			}
+		}
+	}
+	walk(value)
+	return string(jsonx.Stringify(value))
+}
+
 func TestGoReadsTheSameJSONFromBothFiles(t *testing.T) {
-	want := readFile(t, filepath.Join(compatNode, "reads.json"))
+	want := sessionReads(t, readFile(t, filepath.Join(compatNode, "reads.json")))
 	goDir := t.TempDir()
 	runCompatScenario(t, goDir)
 	diffJSON(t, "go engine on the go file", compatReads(t, goDir), want)
 	diffJSON(t, "go engine on the node file", compatReads(t, copyDir(t, compatNode)), want)
 }
 
-func nodeCompat(t *testing.T, mode, dir string) string {
+func runNodeCompat(t *testing.T, mode, dir string) (string, error) {
 	t.Helper()
 	pimon := os.Getenv("PIMON_DIR")
 	if pimon == "" {
@@ -325,20 +356,32 @@ func nodeCompat(t *testing.T, mode, dir string) string {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("compat.mjs %s: %v\n%s", mode, err, stderr.String())
+		return "", fmt.Errorf("compat.mjs %s: %w\n%s", mode, err, stderr.String())
 	}
-	return string(out)
+	return string(out), nil
+}
+
+func nodeCompat(t *testing.T, mode, dir string) string {
+	t.Helper()
+	out, err := runNodeCompat(t, mode, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // PIMON_DIR names a pimon checkout. With it and node on PATH, the TypeScript engine runs the scenario
-// again and reads the file that the Go engine wrote.
-func TestTypeScriptEngineReadsTheGoFile(t *testing.T) {
+// again, and it must refuse the file that the Go engine wrote, because that file has a newer schema.
+func TestTypeScriptEngineWritesTheCommittedFileAndRefusesTheGoFile(t *testing.T) {
 	want := readFile(t, filepath.Join(compatNode, "reads.json"))
 	nodeDir := t.TempDir()
 	nodeCompat(t, "write", nodeDir)
-	diffText(t, "committed node rows", dumpRows(t, copyDir(t, compatNode)), dumpRows(t, nodeDir))
 	diffJSON(t, "node engine on the node file", nodeCompat(t, "read", copyDir(t, nodeDir)), want)
+	diffText(t, "committed node rows", dumpRows(t, copyDir(t, compatNode)), dumpRows(t, nodeDir))
 	goDir := t.TempDir()
 	runCompatScenario(t, goDir)
-	diffJSON(t, "node engine on the go file", nodeCompat(t, "read", goDir), want)
+	_, err := runNodeCompat(t, "read", goDir)
+	if err == nil || !strings.Contains(err.Error(), "database schema 3 is newer than this hub (2)") {
+		t.Errorf("node engine on the go file: %v, want the newer schema error", err)
+	}
 }

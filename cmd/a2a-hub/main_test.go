@@ -310,7 +310,7 @@ func TestExitCodes(t *testing.T) {
 		{[]string{"--listen", "8080"}, 2, "--listen must be host:port, got 8080"},
 		{[]string{"--public-url", "hub.example"}, 2, "--public-url must start with http:// or https://"},
 		{[]string{"--nope"}, 1, "unknown option"},
-		{[]string{"--listen", "127.0.0.1:0", "--data", newer}, 1, "database schema 9 is newer than this hub (2)"},
+		{[]string{"--listen", "127.0.0.1:0", "--data", newer}, 1, "database schema 9 is newer than this hub (3)"},
 		{[]string{"--listen", "127.0.0.1:0", "--data", store.Memory, "--tokens", badTokens}, 1, `token x: kind must be "host" or "peer"`},
 		{[]string{"--listen", "127.0.0.1:0", "--data", store.Memory, "--tokens", filepath.Join(dir, "missing.json")}, 1, "no such file"},
 	}

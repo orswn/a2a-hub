@@ -89,7 +89,7 @@ func setup(t *testing.T, allow []string) *testPush {
 		return &http.Response{StatusCode: int(p.status.Load()), Header: header, Body: http.NoBody, Request: req}, nil
 	})})
 	if _, err := e.Register(auth.Principal{Name: "mars", Kind: auth.KindHost},
-		jsonx.NewObject("agent", "a1", "protocol", float64(engine.HubProtocol))); err != nil {
+		jsonx.NewObject("agent", "a1", "protocol", float64(engine.HubProtocol), "labels", jsonx.NewObject(engine.HarnessLabel, "test"))); err != nil {
 		t.Fatal(err)
 	}
 	sent, err := e.Send(engine.SendInput{AgentID: "a1", Caller: hermes, Message: jsonx.NewObject(

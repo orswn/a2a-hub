@@ -158,6 +158,48 @@ var Migrations = []Migration{
 	CREATE INDEX remote_tasks_context ON remote_tasks (agent_id, context_id, state);
 	CREATE INDEX remote_tasks_remote ON remote_tasks (agent_id, remote_task_id);
 	`},
+	// The pi agent kind becomes session, and labels.harness names the harness. Only pimon wrote kind 'pi',
+	// so each such row gets harness pi. A kind is also stored in messages.sender_kind and in the from.kind of
+	// message link events.
+	{SQL: `
+	CREATE TABLE agents_new (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL CHECK (kind IN ('session', 'external', 'builtin')),
+		host TEXT,
+		name TEXT NOT NULL,
+		role TEXT,
+		cwd TEXT,
+		labels TEXT NOT NULL DEFAULT '{}',
+		parent TEXT,
+		topics TEXT NOT NULL DEFAULT '[]',
+		ephemeral INTEGER NOT NULL DEFAULT 0,
+		online INTEGER NOT NULL DEFAULT 0,
+		state TEXT NOT NULL DEFAULT 'idle' CHECK (state IN ('busy', 'idle')),
+		activity TEXT,
+		status_text TEXT NOT NULL DEFAULT '',
+		status_at TEXT,
+		registered_at TEXT NOT NULL,
+		last_seen_at TEXT,
+		offline_at TEXT
+	);
+	INSERT INTO agents_new (id, kind, host, name, role, cwd, labels, parent, topics, ephemeral, online, state, activity,
+		status_text, status_at, registered_at, last_seen_at, offline_at)
+	SELECT id, CASE kind WHEN 'pi' THEN 'session' ELSE kind END, host, name, role, cwd,
+		CASE WHEN kind = 'pi' AND json_valid(labels) THEN
+			CASE WHEN json_type(labels) = 'object' AND coalesce(json_extract(labels, '$.harness'), '') = ''
+				THEN json_set(labels, '$.harness', 'pi') ELSE labels END
+		ELSE labels END,
+		parent, topics, ephemeral, online, state, activity, status_text, status_at, registered_at, last_seen_at, offline_at
+	FROM agents;
+	DROP TABLE agents;
+	ALTER TABLE agents_new RENAME TO agents;
+	CREATE INDEX agents_name ON agents (name);
+	CREATE INDEX agents_parent ON agents (parent);
+
+	UPDATE messages SET sender_kind = 'session' WHERE sender_kind = 'pi';
+	UPDATE link_events SET payload = json_set(payload, '$.from.kind', 'session')
+		WHERE json_valid(payload) AND json_extract(payload, '$.from.kind') = 'pi';
+	`},
 }
 
 // SchemaVersion is the user_version that this hub writes.

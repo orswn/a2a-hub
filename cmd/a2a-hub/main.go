@@ -116,7 +116,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	}
 	var online []string
 	for _, agent := range agents {
-		if agent.Kind == "pi" {
+		if agent.Kind == engine.KindSession {
 			online = append(online, agent.ID)
 		}
 	}

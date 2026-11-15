@@ -74,7 +74,7 @@ func (e *Engine) RequireAgent(id string) (*AgentRow, error) {
 
 func (e *Engine) requireOwnAgent(principal auth.Principal, id string) *AgentRow {
 	row := e.agent(id)
-	if row == nil || row.Kind != "pi" || principal.Kind != auth.KindHost || row.Host == nil || *row.Host != principal.Name {
+	if row == nil || row.Kind != KindSession || principal.Kind != auth.KindHost || row.Host == nil || *row.Host != principal.Name {
 		throw(ReasonForbidden, "agent %s is not bound to %s", id, principal.Name)
 	}
 	return row
@@ -159,7 +159,7 @@ func (e *Engine) EnsureExternal(id, name string) error {
 		}
 		e.tx(func() {
 			existing := e.agent(id)
-			if existing != nil && existing.Kind != "external" {
+			if existing != nil && existing.Kind != KindExternal {
 				throw(ReasonConflict, "agent id %s is in use by a %s agent", id, existing.Kind)
 			}
 			if existing != nil {
@@ -173,9 +173,10 @@ func (e *Engine) EnsureExternal(id, name string) error {
 	})
 }
 
-// UpgradeDetails is the extra field of the 426 error body.
+// UpgradeDetails are the extra fields of the 426 error body.
 type UpgradeDetails struct {
-	Expected int `json:"expected"`
+	Expected  int   `json:"expected"`
+	Supported []int `json:"supported"`
 }
 
 // Register binds an agent to the host principal. A field that the body leaves out keeps its value.
@@ -187,8 +188,10 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 	if principal.Kind != auth.KindHost {
 		throw(ReasonForbidden, "only host principals may register agents")
 	}
-	if protocol, ok := body.Value("protocol").(float64); !ok || protocol != HubProtocol {
-		panic(newError(ReasonUpgrade, UpgradeDetails{Expected: HubProtocol}, "hub protocol %d required", HubProtocol))
+	protocol, ok := body.Value("protocol").(float64)
+	if !ok || (protocol != LegacyProtocol && protocol != HubProtocol) {
+		panic(newError(ReasonUpgrade, UpgradeDetails{Expected: HubProtocol, Supported: SupportedProtocols},
+			"hub protocol %d required", HubProtocol))
 	}
 	id := requireString(body.Value("agent"), "agent", 128)
 	if !agentIDPattern.MatchString(id) {
@@ -215,7 +218,7 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 	}
 	return txValue(e, func() RegisterResult {
 		existing := e.agent(id)
-		if existing != nil && (existing.Kind != "pi" || existing.Host == nil || *existing.Host != principal.Name) {
+		if existing != nil && (existing.Kind != KindSession || existing.Host == nil || *existing.Host != principal.Name) {
 			throw(ReasonForbidden, "agent %s is bound to another host", id)
 		}
 		if existing == nil {
@@ -228,7 +231,7 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 		cwd := firstOf(givenCwd, existing.Cwd)
 		role := firstOf(givenRole, existing.Role)
 		parent := firstOf(givenParent, existing.Parent)
-		labels := deref(firstOf(givenLabels, &existing.Labels))
+		labels := withHarness(deref(firstOf(givenLabels, &existing.Labels)), protocol == LegacyProtocol)
 		topics := deref(firstOf(givenTopics, &existing.Topics))
 		ephemeral := existing.Ephemeral
 		if givenEphemeral != nil {
@@ -240,11 +243,27 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 				 WHERE id = ?`, *name, cwd, role, parent, labels, topics, ephemeral, at, id)
 		} else {
 			e.run(`INSERT INTO agents (id, kind, host, name, cwd, role, parent, labels, topics, ephemeral, online, registered_at, last_seen_at, offline_at)
-				 VALUES (?, 'pi', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+				 VALUES (?, 'session', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
 				id, principal.Name, *name, cwd, role, parent, labels, topics, ephemeral, at, at, at)
 		}
 		return RegisterResult{Agent: id, Name: *name, Host: principal.Name}
 	})
+}
+
+// withHarness checks that session labels name the harness. A protocol 2 client and a child row may leave it out:
+// they get the harness of protocol 2.
+func withHarness(labels string, legacy bool) string {
+	obj, _ := mustParse(labels).(*jsonx.Object)
+	if name, _ := obj.String(HarnessLabel); name != "" {
+		return labels
+	}
+	if !legacy {
+		throw(ReasonInvalid, "labels.%s is required with hub protocol %d", HarnessLabel, HubProtocol)
+	}
+	if obj == nil {
+		obj = &jsonx.Object{}
+	}
+	return stringify(obj.Set(HarnessLabel, LegacyHarness))
 }
 
 func existingName(row *AgentRow) *string {
@@ -276,26 +295,26 @@ func (e *Engine) AddChild(principal auth.Principal, parentID string, body any) (
 		name := deref(firstOf(optionalString(obj.Value("name"), "name", 128), strPtr(DefaultAgentName(principal.Name, id))))
 		cwd := optionalString(obj.Value("cwd"), "cwd", 4096)
 		role := optionalString(obj.Value("role"), "role", 256)
-		labels := stringify(labelMap(obj.Value("labels")))
+		labels := withHarness(stringify(labelMap(obj.Value("labels"))), true)
 		return txValue(e, func() RegisterResult {
 			existing := e.agent(id)
 			at := e.iso()
 			if existing != nil {
-				if existing.Kind != "pi" || existing.Host == nil || *existing.Host != principal.Name || existing.Parent == nil || *existing.Parent != parentID {
+				if existing.Kind != KindSession || existing.Host == nil || *existing.Host != principal.Name || existing.Parent == nil || *existing.Parent != parentID {
 					throw(ReasonConflict, "agent %s exists with another parent or host", id)
 				}
 				e.run("UPDATE agents SET name = ?, cwd = ?, role = ?, labels = ? WHERE id = ?", name, cwd, role, labels, id)
 			} else {
 				e.run(`INSERT INTO agents (id, kind, host, name, cwd, role, parent, labels, online, registered_at, offline_at)
-					 VALUES (?, 'pi', ?, ?, ?, ?, ?, ?, 0, ?, ?)`, id, principal.Name, name, cwd, role, parentID, labels, at, at)
+					 VALUES (?, 'session', ?, ?, ?, ?, ?, ?, 0, ?, ?)`, id, principal.Name, name, cwd, role, parentID, labels, at, at)
 			}
 			return RegisterResult{Agent: id, Name: name, Host: principal.Name}
 		})
 	})
 }
 
-// ResolveRef resolves an id, or "@name" to a built-in or external agent with that name, else to the one online pi
-// agent with it. More than one online pi agent with the name gives Ambiguous. nil means no match.
+// ResolveRef resolves an id, or "@name" to a built-in or external agent with that name, else to the one online
+// session agent with it. More than one online session agent with the name gives Ambiguous. nil means no match.
 func (e *Engine) ResolveRef(ref string) (*RefResult, error) {
 	return call(e, func() *RefResult {
 		if len(ref) == 0 || ref[0] != '@' {
@@ -308,7 +327,7 @@ func (e *Engine) ResolveRef(ref string) (*RefResult, error) {
 		if fixed := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind IN ('builtin', 'external') ORDER BY id LIMIT 1", name); len(fixed) > 0 {
 			return &RefResult{Agent: fixed[0]}
 		}
-		online := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind = 'pi' AND online = 1 ORDER BY last_seen_at DESC, id", name)
+		online := e.agents("SELECT "+agentCols+" FROM agents WHERE name = ? AND kind = 'session' AND online = 1 ORDER BY last_seen_at DESC, id", name)
 		switch len(online) {
 		case 0:
 			return nil
@@ -338,7 +357,7 @@ func (e *Engine) SetOnline(id string, online bool) error {
 func (e *Engine) setOnline(id string, online bool) {
 	e.tx(func() {
 		row := e.agent(id)
-		if row == nil || row.Kind == "builtin" {
+		if row == nil || row.Kind == KindBuiltin {
 			return
 		}
 		at := e.iso()
@@ -470,7 +489,7 @@ func (e *Engine) Control(fromID string, target, action any) error {
 			if row == nil {
 				throw(ReasonNotFound, "unknown agent %s", targetID)
 			}
-			if row.Parent == nil || *row.Parent != fromID || row.Kind != "pi" {
+			if row.Parent == nil || *row.Parent != fromID || row.Kind != KindSession {
 				throw(ReasonForbidden, "%s is not a child of %s", targetID, fromID)
 			}
 			if row.Online != 1 {
@@ -518,12 +537,14 @@ func (e *Engine) statusTextMessage(task *taskRow, text string) *jsonx.Object {
 		"taskId", task.ID,
 		"role", "ROLE_AGENT",
 		"parts", []any{jsonx.NewObject("text", text)},
-		"metadata", jsonx.NewObject(BusExtensionURI, jsonx.NewObject("statusText", true)),
+		// Protocol 2 clients read status messages too, so the mark keeps the URI that they know.
+		"metadata", jsonx.NewObject(LegacyBusExtensionURI, jsonx.NewObject("statusText", true)),
 	)
 }
 
 func isStatusTextMessage(message *jsonx.Object) bool {
 	metadata, _ := message.Object("metadata")
-	meta, _ := metadata.Object(BusExtensionURI)
+	_, entry := BusEntry(metadata)
+	meta, _ := entry.(*jsonx.Object)
 	return meta.Value("statusText") == true
 }

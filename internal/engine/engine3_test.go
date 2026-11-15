@@ -79,7 +79,7 @@ func TestAfterCommitListenersAllRunWhenOneFailsAndTheFailureIsLogged(t *testing.
 		t.Fatal(err)
 	}
 	defer func() { _ = engine.Close() }()
-	got(engine.Register(mars, obj("agent", "a1", "protocol", HubProtocol))).ok(t)
+	got(engine.Register(mars, obj("agent", "a1", "protocol", HubProtocol, "labels", obj(HarnessLabel, "test")))).ok(t)
 	id := got(engine.Send(SendInput{AgentID: "a1", Caller: fromHermes, Message: message("job")})).ok(t).Task.ID
 	var seen []State
 	engine.OnTask(id, func(TaskEvent) { panic("listener broke") })
@@ -149,7 +149,7 @@ func TestApplyChangeTurnsATaskUpdateWithTextIntoAnInboxRowForTheSenderAgent(t *t
 	}
 	matchJSON(t, "result row", rows[2], obj(
 		"taskId", id, "contextId", task.ContextID, "direction", "in",
-		"from", obj("agent", "helper", "name", "Helper", "kind", "pi"), "to", obj("agent", "asker", "name", "Asker"),
+		"from", obj("agent", "helper", "name", "Helper", "kind", KindSession), "to", obj("agent", "asker", "name", "Asker"),
 	))
 	var resultFound, plainFound bool
 	for _, e := range h.linkEvents() {
@@ -270,7 +270,7 @@ func TestInboxAndMessageItemsCarryTheBusFields(t *testing.T) {
 	expected := func(direction string) any {
 		return obj(
 			"messageId", "rich", "kind", "note", "wake", "never", "priority", "urgent", "expectReply", true, "replyTo", "x",
-			"subject", "s", "data", obj("n", 1), "from", obj("agent", "asker", "name", "Asker", "kind", "pi"),
+			"subject", "s", "data", obj("n", 1), "from", obj("agent", "asker", "name", "Asker", "kind", KindSession),
 			"to", obj("agent", "helper", "name", "Helper"), "direction", direction,
 		)
 	}

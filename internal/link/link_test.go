@@ -31,7 +31,7 @@ func setup(t *testing.T) *engine.Engine {
 		_ = db.Close()
 	})
 	if _, err := e.Register(auth.Principal{Name: "mars", Kind: auth.KindHost},
-		jsonx.NewObject("agent", "a1", "protocol", float64(engine.HubProtocol))); err != nil {
+		jsonx.NewObject("agent", "a1", "protocol", float64(engine.HubProtocol), "labels", jsonx.NewObject(engine.HarnessLabel, "test"))); err != nil {
 		t.Fatal(err)
 	}
 	return e

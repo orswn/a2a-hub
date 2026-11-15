@@ -113,7 +113,13 @@ func (s *Server) jsonRPC(w http.ResponseWriter, r *http.Request, ref string) err
 		return fail(http.StatusUnauthorized, "unauthorized")
 	}
 	caller := engine.Caller{Principal: principal}
-	if agentHeader := firstHeader(r, engine.AgentHeader); agentHeader != "" {
+	agentHeader := firstHeader(r, engine.AgentHeader)
+	if legacy := firstHeader(r, engine.LegacyAgentHeader); agentHeader == "" {
+		agentHeader = legacy
+	} else if legacy != "" && legacy != agentHeader {
+		return fail(http.StatusBadRequest, "X-A2A-Agent and X-Pimon-Agent name different agents")
+	}
+	if agentHeader != "" {
 		if _, err := s.opts.Engine.RequireOwnAgent(principal, agentHeader); err != nil {
 			return err
 		}

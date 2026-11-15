@@ -503,7 +503,7 @@ func ParseSkills(card any) []*jsonx.Object {
 	return out
 }
 
-// OutboundText puts the sender line in front of the text, so the external agent knows which pi session asks.
+// OutboundText puts the sender line in front of the text, so the external agent knows which session asks.
 func OutboundText(text, senderName string, senderHost *string) string {
 	if senderHost != nil && *senderHost != "" {
 		return "[from " + senderName + " on " + *senderHost + "]\n" + text

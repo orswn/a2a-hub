@@ -6,7 +6,13 @@ const root = join(import.meta.dirname, "..");
 
 describe("contract suite imports", () => {
 	it("takes no value from the protocol sources, so only the JSON Schema file defines the wire", () => {
-		for (const file of ["support/hub-process.ts", "contract/hub-contract.test.ts"]) {
+		const files = [
+			"support/hub-process.ts",
+			"support/contract.ts",
+			"contract/hub-contract.test.ts",
+			"contract/hub-contract-v2.test.ts",
+		];
+		for (const file of files) {
 			const text = readFileSync(join(root, file), "utf8");
 			const imports = [...text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)];
 			expect(imports.length, file).toBeGreaterThan(0);

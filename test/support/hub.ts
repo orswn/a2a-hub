@@ -9,10 +9,13 @@ import {
 	DefaultAgentCardResolver,
 	JsonRpcTransportFactory,
 } from "@a2a-js/sdk/client";
-import { BUS_URI, sleep } from "./hub-process.ts";
+import { AGENT_HEADER, BUS_URI, sleep } from "./hub-process.ts";
 
 export {
+	AGENT_HEADER,
 	BUS_URI,
+	HARNESS,
+	LEGACY,
 	HOST_TOKEN,
 	type HubProcess,
 	LinkClient,
@@ -48,7 +51,7 @@ export async function a2aClient(hubUrl: string, agent: string, headers: Record<s
 
 export function bearer(token: string, agent?: string): Record<string, string> {
 	const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
-	if (agent) headers["X-Pimon-Agent"] = agent;
+	if (agent) headers[AGENT_HEADER] = agent;
 	return headers;
 }
 

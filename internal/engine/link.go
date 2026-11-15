@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// emit stores a link event for a pi agent and tells the link listeners after the commit. nil means the agent
-// is not a pi agent, so it has no mailbox.
+// emit stores a link event for a session agent and tells the link listeners after the commit. nil means the
+// agent is not a session agent, so it has no mailbox.
 func (e *Engine) emit(agentID, eventType string, payload any) *int64 {
 	row := e.agent(agentID)
-	if row == nil || row.Kind != "pi" {
+	if row == nil || row.Kind != KindSession {
 		return nil
 	}
 	text := stringify(payload)

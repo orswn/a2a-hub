@@ -3,6 +3,7 @@ package a2aapi
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 
 	"github.com/orswn/a2a-hub/internal/engine"
 	"github.com/orswn/a2a-hub/internal/jsonx"
@@ -39,8 +40,9 @@ func skillsFor(agent *engine.AgentRow, description string, builtin Builtin, exte
 	if builtin != nil {
 		return []any{jsonx.NewObject("id", builtin.ID(), "name", builtin.Name(), "description", description, "tags", []any{"test"})}
 	}
-	if agent.Kind != "external" {
-		return []any{jsonx.NewObject("id", "pi-session", "name", "pi session", "description", description, "tags", []any{"coding"})}
+	if agent.Kind != engine.KindExternal {
+		// The skill id stays as protocol 2 named it, so a client that keys on it keeps working.
+		return []any{jsonx.NewObject("id", "pi-session", "name", sessionName(agent), "description", description, "tags", []any{"coding"})}
 	}
 	if external != nil && len(external.Skills) > 0 {
 		skills := make([]any, len(external.Skills))
@@ -52,23 +54,34 @@ func skillsFor(agent *engine.AgentRow, description string, builtin Builtin, exte
 	return []any{jsonx.NewObject("id", "external", "name", agent.Name, "description", description, "tags", []any{"external"})}
 }
 
-// BuildCard makes the card in A2A 1.0 JSON form. It has static content only: no cwd, labels, or status.
+// sessionName is "session", after the harness label when the agent has one, such as "codex session".
+func sessionName(agent *engine.AgentRow) string {
+	var labels map[string]any
+	_ = json.Unmarshal([]byte(agent.Labels), &labels)
+	if harness, _ := labels[engine.HarnessLabel].(string); harness != "" {
+		return harness + " session"
+	}
+	return "session"
+}
+
+// BuildCard makes the card in A2A 1.0 JSON form. It has static content only: no cwd, status, or label other
+// than the harness.
 func BuildCard(in CardInput) *jsonx.Object {
 	agent := in.Agent
 	var description string
 	switch {
 	case in.Builtin != nil:
 		description = in.Builtin.Description()
-	case agent.Kind == "external" && in.External != nil:
+	case agent.Kind == engine.KindExternal && in.External != nil:
 		description = in.External.Description
-	case agent.Kind == "external":
+	case agent.Kind == engine.KindExternal:
 		description = agent.Name + ": an external A2A agent"
 	default:
 		host := "unknown host"
 		if agent.Host != nil {
 			host = *agent.Host
 		}
-		description = "pi session on " + host
+		description = sessionName(agent) + " on " + host
 	}
 	card := jsonx.NewObject(
 		"name", agent.Name,
@@ -80,7 +93,7 @@ func BuildCard(in CardInput) *jsonx.Object {
 			"streaming", true,
 			"pushNotifications", true,
 			"extendedAgentCard", false,
-			"extensions", []any{jsonx.NewObject("uri", engine.BusExtensionURI, "required", false)},
+			"extensions", cardExtensions(),
 		),
 		"defaultInputModes", []any{"text/plain"},
 		"defaultOutputModes", []any{"text/plain"},
@@ -93,6 +106,15 @@ func BuildCard(in CardInput) *jsonx.Object {
 			jsonx.NewObject("bearer", jsonx.NewObject("list", []any{})))})
 	}
 	return card
+}
+
+// cardExtensions lists both bus extension URIs, because the hub activates the one that a request names.
+func cardExtensions() []any {
+	out := make([]any, len(engine.BusExtensionURIs))
+	for i, uri := range engine.BusExtensionURIs {
+		out[i] = jsonx.NewObject("uri", uri, "required", false)
+	}
+	return out
 }
 
 // CardEtag is the ETag of the card JSON: the first 32 hex digits of its sha256, quoted.

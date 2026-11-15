@@ -31,9 +31,90 @@ func TestRegisterRefusesAPeerPrincipalAndAWrongProtocol(t *testing.T) {
 	}
 	_, err := h.engine.Register(mars, obj("agent", "a1", "protocol", 1))
 	var hubErr *Error
-	if !errors.As(err, &hubErr) || hubErr.Reason != ReasonUpgrade || hubErr.Status != 426 || jsonOf(t, hubErr.Details) != `{"expected":2}` ||
-		hubErr.Error() != "hub protocol 2 required" {
+	if !errors.As(err, &hubErr) || hubErr.Reason != ReasonUpgrade || hubErr.Status != 426 || jsonOf(t, hubErr.Details) != `{"expected":3,"supported":[2,3]}` ||
+		hubErr.Error() != "hub protocol 3 required" {
 		t.Errorf("protocol 1 = %v", err)
+	}
+}
+
+func labelsOf(t *testing.T, h *testEnv, id string) string {
+	t.Helper()
+	return got(h.engine.RequireAgent(id)).ok(t).Labels
+}
+
+func TestRegisterAcceptsProtocol2AndGivesItTheLegacyHarness(t *testing.T) {
+	h := setup(t)
+	got(h.engine.Register(mars, obj("agent", "old", "protocol", LegacyProtocol, "labels", obj("team", "core")))).ok(t)
+	row := got(h.engine.RequireAgent("old")).ok(t)
+	if row.Kind != KindSession || row.Labels != `{"team":"core","harness":"`+LegacyHarness+`"}` {
+		t.Errorf("kind %s, labels %s", row.Kind, row.Labels)
+	}
+	got(h.engine.Register(mars, obj("agent", "old", "protocol", LegacyProtocol))).ok(t)
+	if labels := labelsOf(t, h, "old"); labels != `{"team":"core","harness":"`+LegacyHarness+`"}` {
+		t.Errorf("labels after a register without labels = %s", labels)
+	}
+	got(h.engine.Register(mars, obj("agent", "named", "protocol", LegacyProtocol, "labels", obj("harness", "codex")))).ok(t)
+	if labels := labelsOf(t, h, "named"); labels != `{"harness":"codex"}` {
+		t.Errorf("labels with a harness = %s", labels)
+	}
+}
+
+func TestRegisterWithProtocol3NeedsTheHarnessLabel(t *testing.T) {
+	h := setup(t)
+	for _, labels := range []any{nil, obj("team", "core"), obj("harness", "")} {
+		body := obj("agent", "new", "protocol", HubProtocol)
+		if labels != nil {
+			body.Set("labels", labels)
+		}
+		_, err := h.engine.Register(mars, body)
+		if reason(t, err) != ReasonInvalid || err.Error() != "labels.harness is required with hub protocol 3" {
+			t.Errorf("labels %s: %v", jsonx.Stringify(labels), err)
+		}
+	}
+	if _, err := h.engine.RequireAgent("new"); reason(t, err) != ReasonNotFound {
+		t.Errorf("a refused register wrote the agent: %v", err)
+	}
+	got(h.engine.Register(mars, obj("agent", "new", "protocol", HubProtocol, "labels", obj("harness", "claude-code", "team", "core")))).ok(t)
+	got(h.engine.Register(mars, obj("agent", "new", "protocol", HubProtocol))).ok(t)
+	if labels := labelsOf(t, h, "new"); labels != `{"harness":"claude-code","team":"core"}` {
+		t.Errorf("labels after a register without labels = %s", labels)
+	}
+	if r := got(h.engine.Register(mars, obj("agent", "new", "protocol", HubProtocol, "labels", obj("team", "x")))).reason(t); r != ReasonInvalid {
+		t.Errorf("new labels without the harness = %q", r)
+	}
+}
+
+func TestAddChildGivesAChildWithoutAHarnessTheLegacyHarness(t *testing.T) {
+	h := setup(t)
+	h.register("parent")
+	got(h.engine.AddChild(mars, "parent", obj("id", "kid"))).ok(t)
+	got(h.engine.AddChild(mars, "parent", obj("id", "coder", "labels", obj("harness", "codex")))).ok(t)
+	if labels := labelsOf(t, h, "kid"); labels != `{"harness":"`+LegacyHarness+`"}` {
+		t.Errorf("kid labels = %s", labels)
+	}
+	if labels := labelsOf(t, h, "coder"); labels != `{"harness":"codex"}` {
+		t.Errorf("coder labels = %s", labels)
+	}
+	if kind := got(h.engine.RequireAgent("kid")).ok(t).Kind; kind != KindSession {
+		t.Errorf("kind = %s", kind)
+	}
+}
+
+func TestParseBusMetadataReadsBothURIsAndPrefersTheCurrentOne(t *testing.T) {
+	cases := []struct {
+		metadata *jsonx.Object
+		kind     string
+	}{
+		{obj(BusExtensionURI, obj("kind", "note")), "note"},
+		{obj(LegacyBusExtensionURI, obj("kind", "answer")), "answer"},
+		{obj(LegacyBusExtensionURI, obj("kind", "answer"), BusExtensionURI, obj("kind", "note")), "note"},
+		{obj("other", obj("kind", "note")), "task"},
+	}
+	for _, c := range cases {
+		meta, err := ParseBusMetadata(c.metadata)
+		if err != nil || meta.Kind != c.kind {
+			t.Errorf("%s: kind %q, %v; want %q", jsonx.Stringify(c.metadata), meta.Kind, err, c.kind)
+		}
 	}
 }
 
@@ -553,7 +634,7 @@ func TestSetStatusPutsTheStatusTextOnEveryWorkingTaskWithoutHistoryGrowth(t *tes
 	task := got(h.engine.ReadTask(working)).ok(t)
 	matchJSON(t, "status message", task.Status.Message, obj(
 		"role", "ROLE_AGENT", "parts", []any{obj("text", "reading files")},
-		"metadata", jsonx.NewObject(BusExtensionURI, obj("statusText", true)),
+		"metadata", jsonx.NewObject(LegacyBusExtensionURI, obj("statusText", true)),
 	))
 	if task.Status.Timestamp != "2026-01-01T00:00:01.000Z" || len(task.History) != 1 || len(updates) != 1 {
 		t.Errorf("timestamp %s, history %d, updates %d", task.Status.Timestamp, len(task.History), len(updates))
@@ -592,5 +673,16 @@ func TestLinkUpdateSetsTheStatusTextWhenATaskEntersWorking(t *testing.T) {
 	equalJSON(t, "parts", task.Status.Message.Value("parts"), []any{obj("text", "busy compiling")})
 	if len(task.History) != 1 {
 		t.Errorf("history = %d", len(task.History))
+	}
+}
+
+func TestAStatusTextMessageIsKnownUnderEitherURI(t *testing.T) {
+	for _, uri := range BusExtensionURIs {
+		if !isStatusTextMessage(obj("metadata", obj(uri, obj("statusText", true)))) {
+			t.Errorf("%s: not a status text message", uri)
+		}
+	}
+	if isStatusTextMessage(obj("metadata", obj("other", obj("statusText", true)))) {
+		t.Error("another key counts as a status text message")
 	}
 }

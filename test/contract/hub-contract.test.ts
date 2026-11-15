@@ -1,9 +1,9 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import Schema from "typebox/schema";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loadContract, type RouteEntry, refName } from "../support/contract.ts";
 import {
+	AGENT_HEADER,
 	BUS_URI,
+	HARNESS,
 	HOST_TOKEN,
 	type HubProcess,
 	LinkClient,
@@ -19,79 +19,8 @@ import {
 // Black-box contract of the hub link API. It talks to a hub process only over HTTP and SSE,
 // and it checks the bodies against the committed JSON Schema file, not against TypeScript types.
 
-interface Ref {
-	$ref: string;
-}
-
-interface RouteEntry {
-	method: string;
-	path: string;
-	request: Ref | null;
-	response: Ref | null;
-	stream: boolean;
-	errors: Record<string, Ref>;
-}
-
-interface ProtocolDocument {
-	$defs: Record<string, unknown>;
-	"x-routes": Record<string, RouteEntry>;
-	"x-events": Record<string, { payload: Ref; stored: boolean }>;
-}
-
-const SCHEMA_FILE = resolve(import.meta.dirname, "../../protocol/schema", `hub-protocol-v${PROTOCOL}.json`);
-const document = JSON.parse(readFileSync(SCHEMA_FILE, "utf8")) as ProtocolDocument;
-const routes = document["x-routes"];
-const events = document["x-events"];
+const { file: SCHEMA_FILE, document, routes, events, check, routeOf } = loadContract(PROTOCOL);
 const BODY_LIMIT = 1024 * 1024;
-
-/**
- * Sets `additionalProperties: false` on each object schema that does not set it and has no `patternProperties`.
- * So an undeclared field fails, while string maps such as `labels` and objects marked open stay open.
- */
-function closeObjects(node: unknown): unknown {
-	if (Array.isArray(node)) return node.map(closeObjects);
-	if (!node || typeof node !== "object") return node;
-	const out: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(node)) out[key] = closeObjects(value);
-	if (out["type"] === "object" && !("additionalProperties" in out) && !("patternProperties" in out)) {
-		out["additionalProperties"] = false;
-	}
-	return out;
-}
-
-const closedDefs = closeObjects(document.$defs) as Record<string, unknown>;
-const validators = new Map<string, ReturnType<typeof Schema.Compile>>();
-
-function refName(ref: Ref): string {
-	const prefix = "#/$defs/";
-	if (!ref.$ref.startsWith(prefix)) throw new Error(`unexpected $ref ${ref.$ref}`);
-	return ref.$ref.slice(prefix.length);
-}
-
-function check(name: string, value: unknown, where: string): void {
-	let validator = validators.get(name);
-	if (!validator) {
-		if (!(name in closedDefs)) throw new Error(`${where}: no definition ${name}`);
-		validator = Schema.Compile({ $defs: closedDefs, $ref: `#/$defs/${name}` } as Schema.XSchema);
-		validators.set(name, validator);
-	}
-	const [valid, errors] = validator.Errors(value);
-	if (!valid) {
-		throw new Error(
-			`${where}: value does not match ${name}\nerrors: ${JSON.stringify(errors, null, 2)}\nvalue: ${JSON.stringify(value)}`,
-		);
-	}
-}
-
-function routeOf(method: string, path: string): string {
-	const segments = path.split("?")[0]?.split("/").filter(Boolean).map(decodeURIComponent) ?? [];
-	for (const [key, route] of Object.entries(routes)) {
-		const parts = route.path.split("/").filter(Boolean);
-		if (route.method !== method || parts.length !== segments.length) continue;
-		if (parts.every((part, index) => part.startsWith(":") || part === segments[index])) return key;
-	}
-	throw new Error(`${method} ${path} matches no route in ${SCHEMA_FILE}`);
-}
 
 describe("hub link contract", () => {
 	const tmp = tempDir("hub-contract-");
@@ -228,7 +157,7 @@ describe("hub link contract", () => {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${HOST_TOKEN}`,
-				"X-Pimon-Agent": from,
+				[AGENT_HEADER]: from,
 				"Content-Type": "application/json",
 				"A2A-Version": "1.0",
 				"A2A-Extensions": BUS_URI,
@@ -270,7 +199,8 @@ describe("hub link contract", () => {
 	}
 
 	it("reads the schema of the protocol under test", () => {
-		expect((document as { $id?: string }).$id).toBe(`urn:a2a-hub:protocol:${PROTOCOL}`);
+		expect(document.$id).toBe(`urn:a2a-hub:protocol:${PROTOCOL}`);
+		expect((document as unknown as Record<string, unknown>)["x-bus-extension-uri"]).toBe(BUS_URI);
 	});
 
 	it("answers health without a token", async () => {
@@ -284,7 +214,7 @@ describe("hub link contract", () => {
 			name: "alpha",
 			cwd: "/work",
 			role: "lead",
-			labels: { team: "core" },
+			labels: { harness: HARNESS, team: "core" },
 			topics: ["build"],
 			ephemeral: false,
 			protocol: PROTOCOL,
@@ -298,12 +228,18 @@ describe("hub link contract", () => {
 		await events.body?.cancel();
 		alphaLink = await stream(alpha);
 		expect(
-			await ok("POST", `/link/${alpha}/children`, { id: kid, name: "kid", role: "helper", labels: {}, cwd: "/k" }),
+			await ok("POST", `/link/${alpha}/children`, {
+				id: kid,
+				name: "kid",
+				role: "helper",
+				labels: { harness: HARNESS },
+				cwd: "/k",
+			}),
 		).toEqual({ agent: kid, name: "kid", host: "mars" });
 		await ok("POST", "/link/register", { agent: kid, parent: alpha, protocol: PROTOCOL });
 		kidLink = await stream(kid);
 		await next(alphaLink, "presence", (data) => data["agent"] === kid && data["online"] === true);
-		await ok("POST", "/link/register", { agent: beta, name: "beta", protocol: PROTOCOL });
+		await ok("POST", "/link/register", { agent: beta, name: "beta", labels: { harness: HARNESS }, protocol: PROTOCOL });
 		betaLink = await stream(beta);
 
 		const listed = await ok("GET", "/agents");
@@ -311,7 +247,11 @@ describe("hub link contract", () => {
 			expect.arrayContaining([alpha, beta, kid]),
 		);
 		await ok("GET", "/agents?offline=1");
-		expect(await ok("GET", `/agents/${alpha}`)).toMatchObject({ id: alpha, labels: { team: "core" } });
+		expect(await ok("GET", `/agents/${alpha}`)).toMatchObject({
+			id: alpha,
+			kind: "session",
+			labels: { harness: HARNESS, team: "core" },
+		});
 	});
 
 	it("stores state, status, and topics", async () => {
@@ -397,6 +337,10 @@ describe("hub link contract", () => {
 		expect(await fails(426, "POST", "/link/register", { body: { agent: alpha, protocol: 1 } })).toEqual({
 			error: `hub protocol ${PROTOCOL} required`,
 			expected: PROTOCOL,
+			supported: [2, PROTOCOL],
+		});
+		expect(await fails(400, "POST", "/link/register", { body: { agent: "contract-new", protocol: PROTOCOL } })).toEqual({
+			error: `labels.harness is required with hub protocol ${PROTOCOL}`,
 		});
 		await fails(413, "POST", `/link/${alpha}/status`, { raw: "x".repeat(BODY_LIMIT + 1) });
 

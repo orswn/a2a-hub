@@ -51,7 +51,7 @@ func setup(t *testing.T, dir string) *testHub {
 		_ = db.Close()
 	})
 	if _, err := e.Register(auth.Principal{Name: "mars", Kind: auth.KindHost},
-		jsonx.NewObject("agent", "a1", "protocol", float64(engine.HubProtocol))); err != nil {
+		jsonx.NewObject("agent", "a1", "protocol", float64(engine.HubProtocol), "labels", jsonx.NewObject(engine.HarnessLabel, "test"))); err != nil {
 		t.Fatal(err)
 	}
 	h.engine = e
@@ -286,5 +286,56 @@ func TestUnexpectedErrorIsLoggedAndSentAsAGenericMessage(t *testing.T) {
 	}
 	if !strings.Contains(h.logged(), "task_messages") {
 		t.Errorf("logged = %q", h.logged())
+	}
+}
+
+func TestASendStampsTheDeliveryUnderTheBusURIThatTheRequestUsed(t *testing.T) {
+	current, legacy := engine.BusExtensionURI, engine.LegacyBusExtensionURI
+	wait := map[string]any{"deliveryWait": true}
+	cases := []struct {
+		name     string
+		message  map[string]any
+		request  map[string]any
+		wantURI  string
+		header   string
+		activate []string
+	}{
+		{"protocol 2 client", map[string]any{legacy: wait}, nil, legacy, legacy, []string{legacy}},
+		{"protocol 3 client", map[string]any{current: wait}, nil, current, current, []string{current}},
+		{"request metadata", nil, map[string]any{legacy: wait}, legacy, "", []string{}},
+		{"both keys", map[string]any{legacy: wait, current: wait}, nil, current, current + ", " + legacy, []string{current, legacy}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := setup(t, "")
+			params := map[string][]string{}
+			if c.header != "" {
+				params[a2a.SvcParamExtensions] = []string{c.header}
+			}
+			ctx, callCtx := a2asrv.NewCallContext(context.Background(), a2asrv.NewServiceParams(params))
+			req := request("hi", true)
+			req.Message.Metadata = c.message
+			req.Metadata = c.request
+			result, err := h.handler(hermes).SendMessage(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, ok := result.(*a2a.Task)
+			if !ok {
+				t.Fatalf("result %T", result)
+			}
+			stamps := map[string]any{}
+			for _, uri := range engine.BusExtensionURIs {
+				if v, ok := task.Metadata[uri]; ok {
+					stamps[uri] = v
+				}
+			}
+			if got, want := fmt.Sprint(stamps), fmt.Sprint(map[string]any{c.wantURI: map[string]any{"delivery": Queued}}); got != want {
+				t.Errorf("stamps %s, want %s", got, want)
+			}
+			if got := callCtx.Extensions().ActivatedURIs(); fmt.Sprint(got) != fmt.Sprint(c.activate) {
+				t.Errorf("activated %q, want %q", got, c.activate)
+			}
+		})
 	}
 }

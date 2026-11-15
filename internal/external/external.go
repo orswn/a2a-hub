@@ -20,7 +20,7 @@ import (
 type Agent struct {
 	// ID is the hub agent id, /a2a/<id>, and the key in the file.
 	ID string
-	// Name is what @<name> resolves to before any pi session.
+	// Name is what @<name> resolves to before any session agent.
 	Name string
 	// URL is the JSON-RPC URL of the agent. Its card is at <url>/.well-known/agent-card.json.
 	URL         string

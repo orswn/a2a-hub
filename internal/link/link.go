@@ -1,4 +1,4 @@
-// Package link serves the link event streams of pi agents and keeps their presence.
+// Package link serves the link event streams of session agents and keeps their presence.
 package link
 
 import (

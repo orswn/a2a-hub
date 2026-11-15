@@ -2,11 +2,13 @@ import { TaskState } from "@a2a-js/sdk";
 import type { Client } from "@a2a-js/sdk/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+	AGENT_HEADER,
 	a2aClient,
 	BUS_URI,
 	bearer,
 	HOST_TOKEN,
 	type HubProcess,
+	LEGACY,
 	LinkClient,
 	OTHER_HOST_TOKEN,
 	PEER_TOKEN,
@@ -168,7 +170,7 @@ describe("hub link API", () => {
 		const anonymous = await fetch(`${hub.url}/agents`);
 		expect(anonymous.status).toBe(401);
 		const old = await link.request("POST", "/link/register", { agent: link.agent, protocol: 1 });
-		expect(old).toEqual({ status: 426, body: expect.objectContaining({ expected: 2 }) });
+		expect(old).toEqual({ status: 426, body: expect.objectContaining({ expected: 3, supported: [2, 3] }) });
 		const rpc = (headers: Record<string, string>) =>
 			fetch(`${hub.url}/a2a/${link.agent}`, {
 				method: "POST",
@@ -178,6 +180,28 @@ describe("hub link API", () => {
 		expect((await rpc(bearer(OTHER_HOST_TOKEN, link.agent))).status).toBe(403);
 		expect((await rpc(bearer(PEER_TOKEN, link.agent))).status).toBe(403);
 		expect((await rpc(bearer(HOST_TOKEN, link.agent))).status).toBe(200);
+	});
+
+	it("takes the agent header under either name and refuses two names that differ", async () => {
+		const link = await agent({}, false);
+		const other = await agent({}, false);
+		const rpc = async (headers: Record<string, string>) => {
+			const response = await fetch(`${hub.url}/a2a/${link.agent}`, {
+				method: "POST",
+				headers: { ...bearer(HOST_TOKEN), ...headers, "Content-Type": "application/json", "A2A-Version": "1.0" },
+				body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "GetTask", params: { id: "x" } }),
+			});
+			return { status: response.status, body: (await response.json()) as unknown };
+		};
+		expect((await rpc({ [AGENT_HEADER]: link.agent })).status).toBe(200);
+		expect((await rpc({ [LEGACY.agentHeader]: link.agent })).status).toBe(200);
+		expect((await rpc({ [AGENT_HEADER]: link.agent, [LEGACY.agentHeader]: link.agent })).status).toBe(200);
+		expect(await rpc({ [AGENT_HEADER]: link.agent, [LEGACY.agentHeader]: other.agent })).toEqual({
+			status: 400,
+			body: { error: "X-A2A-Agent and X-Pimon-Agent name different agents" },
+		});
+		const venus = { ...bearer(OTHER_HOST_TOKEN) };
+		expect((await rpc({ ...venus, [LEGACY.agentHeader]: link.agent })).status).toBe(403);
 	});
 
 	it("routes sender identity, owed work, thread, and inbox items through the link", async () => {
@@ -190,7 +214,7 @@ describe("hub link API", () => {
 			),
 		);
 		const event = await helper.next("message", (data) => data["taskId"] === task.id);
-		expect(event.data).toMatchObject({ from: { agent: asker.agent, name: "asker", kind: "pi" }, expectReply: true });
+		expect(event.data).toMatchObject({ from: { agent: asker.agent, name: "asker", kind: "session" }, expectReply: true });
 		const owed = await helper.ok("GET", `/link/${helper.agent}/owed`);
 		expect(owed).toMatchObject({
 			expectReply: [{ taskId: task.id, agent: asker.agent }],

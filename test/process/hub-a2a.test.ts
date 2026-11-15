@@ -209,7 +209,7 @@ describe("hub A2A face", () => {
 		const card = (await response.json()) as Record<string, unknown>;
 		expect(card).toMatchObject({
 			name: "bee",
-			description: "pi session on mars",
+			description: "test session on mars",
 			supportedInterfaces: [{ url: `${hub.url}/a2a/${agent}`, protocolBinding: "JSONRPC", protocolVersion: "1.0" }],
 			securitySchemes: { bearer: { httpAuthSecurityScheme: { scheme: "bearer" } } },
 		});

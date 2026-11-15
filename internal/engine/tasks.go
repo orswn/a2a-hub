@@ -732,7 +732,7 @@ func (e *Engine) mergeArtifact(task *taskRow, artifact *jsonx.Object, appendPart
 	return artifact
 }
 
-// LinkUpdate is POST /link/<agent>/tasks/<taskId>: a state, a text, and an artifact from a pi agent.
+// LinkUpdate is POST /link/<agent>/tasks/<taskId>: a state, a text, and an artifact from a session agent.
 func (e *Engine) LinkUpdate(agentID, taskID string, body any) (*Task, error) {
 	return call(e, func() *Task {
 		obj := objectBody(body, "body must be an object")

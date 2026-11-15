@@ -7,9 +7,18 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 /** The protocol of the hub under test. The contract suite pins it to the `$id` of the schema file. */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 export const DEFAULT_HUB_BIN = resolve(import.meta.dirname, "../../bin/a2a-hub");
-export const BUS_URI = "https://github.com/orswn/pimon/a2a/bus/v1";
+export const BUS_URI = "https://github.com/orswn/a2a-hub/bus/v1";
+export const AGENT_HEADER = "X-A2A-Agent";
+/** The harness label of the sessions that the suites register. */
+export const HARNESS = "test";
+/** What a protocol 2 client sends. */
+export const LEGACY = {
+	protocol: 2,
+	busUri: "https://github.com/orswn/pimon/a2a/bus/v1",
+	agentHeader: "X-Pimon-Agent",
+} as const;
 export const HOST_TOKEN = "mars-token";
 export const OTHER_HOST_TOKEN = "venus-token";
 export const PEER_TOKEN = "hermes-token";
@@ -143,7 +152,7 @@ export class LinkClient {
 	}
 
 	register(extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-		return this.ok("POST", "/link/register", { agent: this.agent, protocol: 2, ...extra });
+		return this.ok("POST", "/link/register", { agent: this.agent, protocol: PROTOCOL, labels: { harness: HARNESS }, ...extra });
 	}
 
 	async connect(options: { lastEventId?: string; query?: string } = {}): Promise<void> {

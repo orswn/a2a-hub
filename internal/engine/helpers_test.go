@@ -107,7 +107,7 @@ func (h *testEnv) register(agent string, extra ...any) RegisterResult {
 }
 
 func (h *testEnv) registerAs(principal auth.Principal, agent string, extra ...any) (RegisterResult, error) {
-	body := jsonx.NewObject("agent", agent, "protocol", float64(HubProtocol))
+	body := jsonx.NewObject("agent", agent, "protocol", float64(HubProtocol), "labels", jsonx.NewObject(HarnessLabel, "test"))
 	for i := 0; i+1 < len(extra); i += 2 {
 		body.Set(extra[i].(string), value(extra[i+1]))
 	}
