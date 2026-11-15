@@ -19,22 +19,36 @@ type Builtin interface {
 	Start(e *engine.Engine, taskID string, message *jsonx.Object)
 }
 
-// CardInput is what a card is made of.
-type CardInput struct {
-	Agent   *engine.AgentRow
-	BaseURL string
-	Version string
-	Builtin Builtin
+// ExternalCard is the card content of an external agent: the configured description and the skills of the
+// last card that the agent served.
+type ExternalCard struct {
+	Description string
+	Skills      []*jsonx.Object
 }
 
-func skillsFor(agent *engine.AgentRow, description string, builtin Builtin) []any {
+// CardInput is what a card is made of.
+type CardInput struct {
+	Agent    *engine.AgentRow
+	BaseURL  string
+	Version  string
+	Builtin  Builtin
+	External *ExternalCard
+}
+
+func skillsFor(agent *engine.AgentRow, description string, builtin Builtin, external *ExternalCard) []any {
 	if builtin != nil {
 		return []any{jsonx.NewObject("id", builtin.ID(), "name", builtin.Name(), "description", description, "tags", []any{"test"})}
 	}
 	if agent.Kind != "external" {
 		return []any{jsonx.NewObject("id", "pi-session", "name", "pi session", "description", description, "tags", []any{"coding"})}
 	}
-	// FIXME(okka): use the skills of the external agent's own card once the gateway reads it.
+	if external != nil && len(external.Skills) > 0 {
+		skills := make([]any, len(external.Skills))
+		for i, skill := range external.Skills {
+			skills[i] = skill
+		}
+		return skills
+	}
 	return []any{jsonx.NewObject("id", "external", "name", agent.Name, "description", description, "tags", []any{"external"})}
 }
 
@@ -45,8 +59,9 @@ func BuildCard(in CardInput) *jsonx.Object {
 	switch {
 	case in.Builtin != nil:
 		description = in.Builtin.Description()
+	case agent.Kind == "external" && in.External != nil:
+		description = in.External.Description
 	case agent.Kind == "external":
-		// FIXME(okka): use the configured description of the external agent once the gateway exists.
 		description = agent.Name + ": an external A2A agent"
 	default:
 		host := "unknown host"
@@ -69,7 +84,7 @@ func BuildCard(in CardInput) *jsonx.Object {
 		),
 		"defaultInputModes", []any{"text/plain"},
 		"defaultOutputModes", []any{"text/plain"},
-		"skills", skillsFor(agent, description, in.Builtin),
+		"skills", skillsFor(agent, description, in.Builtin, in.External),
 	)
 	if in.Builtin == nil {
 		card.Set("securitySchemes", jsonx.NewObject("bearer",

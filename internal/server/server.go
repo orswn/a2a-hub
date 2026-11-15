@@ -37,6 +37,8 @@ type Options struct {
 	Agents   AgentCounter
 	Link     *link.Hub
 	Builtins map[string]a2aapi.Builtin
+	// Externals gives the card content of external agents. nil means none.
+	Externals ExternalCards
 	// PublicURL is the base URL of the cards. Empty means the URL of the request.
 	PublicURL string
 	// Listen is host:port, the base URL when a request has no Host header.
@@ -44,6 +46,11 @@ type Options struct {
 	Heartbeat time.Duration
 	Holds     *a2aapi.HoldLimiter
 	Log       func(line string)
+}
+
+// ExternalCards gives the card content of an external agent. nil means the agent is not configured.
+type ExternalCards interface {
+	Card(agentID string) *a2aapi.ExternalCard
 }
 
 // AgentCounter counts the online agents.
@@ -303,8 +310,13 @@ func (s *Server) resolve(ref string) (*engine.RefResult, error) {
 }
 
 func (s *Server) cardFor(r *http.Request, agent *engine.AgentRow) *jsonx.Object {
+	var external *a2aapi.ExternalCard
+	if s.opts.Externals != nil && agent.Kind == "external" {
+		external = s.opts.Externals.Card(agent.ID)
+	}
 	return a2aapi.BuildCard(a2aapi.CardInput{
 		Agent: agent, BaseURL: s.baseURL(r), Version: s.opts.Version, Builtin: s.opts.Builtins[agent.ID],
+		External: external,
 	})
 }
 
