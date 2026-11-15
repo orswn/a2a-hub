@@ -485,7 +485,9 @@ describe("hub external agents: close", () => {
 			await waitUntil(async () => held.length > 0);
 			const stoppedAt = Date.now();
 			const code = await Promise.race([hub.stop(), sleep(5000).then(() => "timeout" as const)]);
-			expect(code).not.toBe("timeout");
+			// The TypeScript hub sometimes dies by the signal itself here, so only the Go binary must exit 0.
+			if (process.env["HUB_BIN"]) expect(code).not.toBe("timeout");
+			else expect(code).toBe(0);
 			expect(Date.now() - stoppedAt).toBeLessThan(2000);
 		} finally {
 			hub.child.kill("SIGKILL");

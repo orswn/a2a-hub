@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -613,5 +614,65 @@ func TestAnAnswerOverTheLimitFailsTheTaskAtOnce(t *testing.T) {
 				t.Errorf("status text %q", got)
 			}
 		})
+	}
+}
+
+func TestAReloadThatRemovesTheAgentFailsItsOpenDispatch(t *testing.T) {
+	h := setup(t)
+	opened := make(chan struct{}, 1)
+	server := agentServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		frames(w, `{"result":{"task":{"id":"r1","contextId":"c","status":{"state":"TASK_STATE_WORKING"}}}}`)
+		opened <- struct{}{}
+		<-r.Context().Done()
+	})
+	g := h.gateway(server.URL, nil)
+	id := h.send("hello")
+	<-opened
+	h.waitTask(id, engine.StateWorking)
+	deadline := time.Now().Add(3 * time.Second)
+	for !h.online("ext") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	g.Configure([]external.Agent{})
+	task := h.waitTask(id, engine.StateFailed)
+	if got := statusText(task); got != "ext was removed from the hub config" {
+		t.Errorf("status text %q", got)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if h.online("ext") {
+		t.Error("the removed agent is online")
+	}
+	if remote, err := h.engine.LatestRemote(id); err != nil || remote == nil || remote.State != "done" {
+		t.Errorf("remote %+v %v", remote, err)
+	}
+}
+
+func TestOutboundTextAndParseSkillsMatchTheTypeScriptHelpers(t *testing.T) {
+	mars := "mars"
+	for _, c := range []struct {
+		host *string
+		name string
+		want string
+	}{{&mars, "bee", "[from bee on mars]\nhi"}, {nil, "hermes", "[from hermes]\nhi"}} {
+		if got := OutboundText("hi", c.name, c.host); got != c.want {
+			t.Errorf("OutboundText = %q, want %q", got, c.want)
+		}
+	}
+	for _, c := range []struct {
+		card string
+		want string
+	}{
+		{`{"skills":[{"id":"toolset.web","name":"web","description":"d","tags":["web",3]},{"id":"no-name"},{"id":"x","name":"x"}]}`,
+			`[{"id":"toolset.web","name":"web","description":"d","tags":["web"]},{"id":"x","name":"x","description":"","tags":[]}]`},
+		{`{}`, `[]`},
+	} {
+		card, err := jsonx.ParseString(c.card)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(jsonx.Stringify(ParseSkills(card))); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("ParseSkills(%s) = %s, want %s", c.card, got, c.want)
+		}
 	}
 }
