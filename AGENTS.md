@@ -26,6 +26,7 @@ Go and Node come from `mise.toml`. Run Go through `mise exec --`. Install tools 
 - `internal/a2aapi/`: the A2A request handler on a2a-go types, agent cards, hold limits, delivery states.
 - `internal/server/`: the HTTP front: routes, JSON-RPC and SSE framing, link routes.
 - `internal/link/`: link event streams, heartbeat, and presence.
+- `internal/mcp/`: the `/mcp` endpoint, its tools, Claude Code channel pushes, and the Hermes reply webhook.
 - `internal/push/`: the push sender. `internal/pushguard/`: the push address checks.
 - `internal/testagents/`: the `tck` and `echo` agents of `--test-agents`.
 - `protocol/`: TypeBox source, constants, route manifest, generator, and the committed JSON Schema of the link protocol.

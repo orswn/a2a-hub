@@ -166,6 +166,9 @@ func (s *Server) jsonRPC(w http.ResponseWriter, r *http.Request, ref string) err
 	handler := &a2aapi.Handler{
 		Engine: s.opts.Engine, Agent: found.Agent, Caller: caller, Builtin: builtin, Holds: s.opts.Holds, Log: s.log,
 	}
+	if s.opts.MCP != nil {
+		handler.Served = s.opts.MCP
+	}
 	call, refusal := parseCall(body)
 	if refusal != nil {
 		writeJSON(w, http.StatusOK, rpcResponse(call.id, "error", refusal), nil)

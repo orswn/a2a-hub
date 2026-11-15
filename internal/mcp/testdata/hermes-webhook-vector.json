@@ -1,0 +1,16 @@
+{
+  "scheme": "Hermes v0.23.1 generic HMAC V2 (gateway/platforms/webhook.py)",
+  "signed_bytes": "<X-Webhook-Timestamp> + '.' + <raw body bytes>",
+  "secret": "5f2b8c1d9e4a7f3061b2c8d4e9f0a1b2c3d4e5f60718293a4b5c6d7e8f901234",
+  "timestamp": "1800000000",
+  "body": "{\"event\":\"a2a-hub.message\",\"origin\":{\"platform\":\"telegram\",\"chat_id\":\"-100123\",\"thread_id\":\"42\"},\"from\":{\"id\":\"01a1b7750715\",\"name\":\"mars\",\"harness\":\"pi\"},\"kind\":\"result\",\"message_id\":\"01HUBMSG0000000000000VECTOR\",\"in_reply_to\":\"01HERMESSEND00000000000000\",\"hub_thread_id\":\"01HUBTHREAD000000000000000\",\"task_id\":\"task-1\",\"state\":\"completed\",\"text\":\"Build passed on mars ✔\"}",
+  "body_sha256": "85720fc819ab8eca01e5dbaa7ab308b2f7e625669d9597d53a6d000125fca0ef",
+  "headers": {
+    "Content-Type": "application/json",
+    "X-Request-ID": "01HUBMSG0000000000000VECTOR",
+    "X-Webhook-Timestamp": "1800000000",
+    "X-Webhook-Signature-V2": "aba05fc83de6e2a21f84ac574cde9200a91c5a1992a4e45e91fe3ef2ac89a055"
+  },
+  "url_path": "/webhooks/a2a-hub",
+  "replay_window_seconds": 300
+}

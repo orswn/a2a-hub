@@ -4,6 +4,12 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 ## [Unreleased]
 
+### Added
+
+- The MCP endpoint `/mcp` for the harnesses `claude-code`, `codex`, and `hermes`, with the tools `send`, `reply`, `inbox`, `set_status`, and `peers`. For `hermes`, `send.wait` returns the first reply.
+- Claude Code channel pushes: a `wake` `now` message to a Claude Code agent with an MCP session becomes a `notifications/claude/channel` on its stream. The send gives `unconfirmed`.
+- Replies to the MCP sends of an external agent stay in its MCP inbox. With the new `webhook` field of the external agents file, the hub posts each one with a Hermes generic V2 HMAC signature and the origin of the send.
+
 ## [1.1.0] - 2026-11-15
 
 ### Added

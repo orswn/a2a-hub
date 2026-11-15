@@ -17,6 +17,7 @@ What exists now:
 - The push URL guard (`internal/pushguard`): the config-time and send-time address checks and the allow list.
 - The protocol package `@orswn/a2a-hub-protocol` with the JSON Schema of link protocols 3 and 2.
 - The black-box contract suites of link protocols 3 and 2.
+- The MCP endpoint `/mcp` for Claude Code, Codex, and Hermes, with Claude Code channel pushes and signed reply webhooks to Hermes. See [MCP endpoint](#mcp-endpoint).
 
 ## Agent kinds and protocol versions
 
@@ -40,8 +41,52 @@ Every harness session registers as kind `session`. The label `harness` names the
 
 Planned:
 
-- The `a2a` host CLI and the MCP endpoint for Claude Code and Codex.
+- The `a2a` host CLI and the Codex adapter.
 - A released container image. CI builds it now but pushes it only on a `v*` tag.
+
+## MCP endpoint
+
+`/mcp` is a streamable HTTP MCP server. The hub writes its JSON-RPC by hand: it answers `server/discover` with `-32601` in HTTP 200 and negotiates `2025-11-25`, so Claude Code keeps its channel. One request carries one JSON-RPC message. The hub does not check the `Origin` header: every request needs a bearer token, and the hub sends no CORS headers, so a page in a browser cannot call it with the token.
+
+| Header | Meaning |
+|---|---|
+| `Authorization: Bearer <token>` | Required. A host token, or the peer token of an external agent for `hermes`. |
+| `X-A2A-Harness` | Required on `initialize`: `claude-code`, `codex`, or `hermes`. Another value gets `400`. |
+| `X-A2A-Agent` | `claude-code` only, required: the agent id. |
+| `X-A2A-Session`, `X-A2A-Cwd` | Optional. The session label and the working directory of a `claude-code` agent. Percent-encoding is decoded. |
+| `Mcp-Session-Id` | The session id from the `initialize` answer. Every later request needs it. |
+
+How each harness binds to an agent:
+
+- `claude-code`: `initialize` registers the `session` agent of `X-A2A-Agent` with `harness` `claude-code` on the host of the token. Its name is `claude-<first 6 hex digits of X-A2A-Session>`, or `claude-<pid>` for an agent id of the form `claude-<host>-<pid>-<n>`. It keeps the name of its first register. The `GET` stream of the session owns the presence of the agent, with the link grace. A newer session of the same agent takes over the stream.
+- `codex`: each `tools/call` acts for the agent whose id is `_meta.threadId`. The hub registers an unknown thread as an offline `session` agent with `harness` `codex`. The Codex adapter registers the same id over the link API and owns presence and wakes. The MCP session has no `GET` stream.
+- `hermes`: the session acts for the external agent whose id is the token principal. It has no `GET` stream.
+
+Tools: `send`, `reply`, `inbox`, `set_status`, and `peers`. A `hermes` session also gets `send.wait` (0 to 30 s): it blocks until the first reply, answer, result, or final task state, returns it, and marks it read. Claude Code and Codex get each reply as a push or a wake, so their `send` refuses `wait`. `send` of a `hermes` session also takes `origin` `{platform, chat_id, thread_id}` and stores it with the message. `internal/mcp/testdata/model-visible.txt` records the model-visible text of each harness and its char counts.
+
+### Claude Code channel
+
+A message with `wake` `now` to an agent with a Claude Code MCP session becomes one `notifications/claude/channel` on its `GET` stream. `content` is `<sender name>: <text>`. `meta` holds `message_id`, `sender_kind`, and `kind`. It has no task id, because the tools take a message id. A task result or question goes the same way. Claude Code never confirms a channel event, so the hub acks the event when the write succeeds, and the send gives `unconfirmed` at once. Without an open stream the send gives `queued`, and the next stream pushes the event. A message with `wake` `never` gives `queued` with the text `stored in the hub inbox of <name>`. The hub does not push a message that the model already read.
+
+### Hermes replies
+
+A message to an external agent that answers or continues a hub thread that the agent started through `/mcp` stays in its MCP inbox. The hub does not send it as an A2A task. Unless a waiting `send` took it, the hub posts it to the `webhook` of the agent, signed like the generic route of the Hermes webhook platform:
+
+- `X-Webhook-Timestamp`: Unix seconds.
+- `X-Webhook-Signature-V2`: lowercase hex HMAC-SHA256 of `<timestamp>.<raw body>` with the secret.
+- `X-Request-ID`: the hub message id, the same on each try.
+
+The JSON body:
+
+```json
+{"event": "a2a-hub.message",
+ "origin": {"platform": "telegram", "chat_id": "-100123", "thread_id": "42"},
+ "from": {"id": "pi-1", "name": "mars", "harness": "pi"},
+ "kind": "result", "message_id": "...", "in_reply_to": "...", "hub_thread_id": "...",
+ "task_id": "...", "state": "completed", "text": "..."}
+```
+
+`origin` is the origin of the send that started the thread. Each of its fields is a string, `""` when unknown. The hub tries 3 times, 1 s and 4 s apart, after a network error or a 5xx answer. Another answer ends the tries. A failed post is logged. The message stays in the inbox until `inbox` reads it. Tasks, questions, and corrections outside such a thread still go to the agent over A2A.
 
 ## Build
 
@@ -96,6 +141,7 @@ The external agents file maps a hub agent id to the agent:
 - `token` (required): visible ASCII. The hub sends it as `Authorization: Bearer`.
 - `name`: what `@<name>` resolves to. Default: the id.
 - `description`: the description in the hub card. Default: `<name>: an external A2A agent`.
+- `webhook`: `{"url": "<http or https URL>", "secret": "<shared secret>"}`. The hub posts replies to the MCP sends of this agent there. See [Hermes replies](#hermes-replies). Without it, the replies wait in the MCP inbox of the agent.
 - Timings in milliseconds: `pollMs` (`10000`, the `GetTask` and card retry interval), `cardTtlMs` (`600000`), `replyTimeoutMs` (`960000`, from dispatch to the final answer), `idleMs` (`30000`, the longest stream silence), `retryMs` (`60000`, the wait after a rate limit), `offlineMs` (`600000`, how long the hub retries an agent that it cannot connect to).
 
 A bad file at start stops the hub with exit code `1`. No error text quotes the file, because it holds plain tokens.
@@ -123,7 +169,7 @@ make verify
 - Database compatibility: the engine tests run one scenario that `internal/engine/testdata/compat.mjs` also runs with the TypeScript engine. After the schema 3 migration both files must hold the same rows, and the Go engine must read the committed TypeScript-written file in `testdata/compat-node` the same way. With `PIMON_DIR` set to a pimon checkout and `node` on `PATH`, the test also runs the TypeScript engine again and checks that it refuses the schema 3 file that the Go engine wrote.
 - Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that the files of earlier protocols have not changed.
 - Contract suite: `npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema of protocol 3. A reduced suite checks a protocol 2 client against the protocol 2 file.
-- Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, a restart, and external agents behind a fake A2A agent (`test/support/fake-hermes.ts`).
+- Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, a restart, external agents behind a fake A2A agent (`test/support/fake-hermes.ts`), and `/mcp` driven like Claude Code, Codex, and Hermes with a webhook receiver that checks the recorded Hermes signature vector.
 - Conformance: CI runs a2a-tck against `/a2a/tck` of a hub with `--test-agents`. `scripts/tck-gate.py` fails the job on a failed MUST requirement or fewer than 75 MUST passes. `scripts/hub-python-client.py` then sends a task with the Python A2A SDK.
 
 ## Known wire differences from the TypeScript hub

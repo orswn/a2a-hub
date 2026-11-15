@@ -23,6 +23,7 @@ import (
 	"github.com/orswn/a2a-hub/internal/external"
 	"github.com/orswn/a2a-hub/internal/gateway"
 	"github.com/orswn/a2a-hub/internal/link"
+	"github.com/orswn/a2a-hub/internal/mcp"
 	"github.com/orswn/a2a-hub/internal/push"
 	"github.com/orswn/a2a-hub/internal/pushguard"
 	"github.com/orswn/a2a-hub/internal/server"
@@ -128,6 +129,11 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	gw.Configure(externals)
 	gw.Start()
 	defer gw.Stop()
+	endpoint := mcp.New(mcp.Options{
+		Engine: hubEngine, Link: links, Builtins: builtins, Webhooks: gw, Version: version,
+		PresenceGrace: cfg.PresenceGrace, Log: log,
+	})
+	defer endpoint.Stop()
 	if _, err := hubEngine.Sweep(); err != nil {
 		return err
 	}
@@ -145,7 +151,7 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 	hub := server.New(server.Options{
 		Version: version, Tokens: tokens, Engine: hubEngine, Link: links, Builtins: builtins,
 		Externals: gw, PublicURL: cfg.PublicURL, Listen: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
-		Heartbeat: cfg.Heartbeat, Log: log,
+		Heartbeat: cfg.Heartbeat, MCP: endpoint, Log: log,
 	})
 	httpServer := newHTTPServer(hub)
 	served := make(chan error, 1)

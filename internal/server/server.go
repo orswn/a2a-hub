@@ -19,6 +19,7 @@ import (
 	"github.com/orswn/a2a-hub/internal/engine"
 	"github.com/orswn/a2a-hub/internal/jsonx"
 	"github.com/orswn/a2a-hub/internal/link"
+	"github.com/orswn/a2a-hub/internal/mcp"
 )
 
 // BodyLimit is the largest request body.
@@ -45,7 +46,9 @@ type Options struct {
 	Listen    string
 	Heartbeat time.Duration
 	Holds     *a2aapi.HoldLimiter
-	Log       func(line string)
+	// MCP answers /mcp. nil means no MCP endpoint.
+	MCP *mcp.Server
+	Log func(line string)
 }
 
 // ExternalCards gives the card content of an external agent. nil means the agent is not configured.
@@ -225,6 +228,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) error {
 		return fail(http.StatusNotFound, "not found")
 	case root == "link":
 		return s.linkRoute(w, r, route, rest)
+	case root == "mcp" && len(rest) == 0 && s.opts.MCP != nil:
+		principal, _, err := s.principal(r, false)
+		if err != nil {
+			return err
+		}
+		s.opts.MCP.Serve(w, r, principal)
+		return nil
 	case route == "GET /agents" || route == "GET /agents/:id":
 		if _, err := s.requireHost(r); err != nil {
 			return err
