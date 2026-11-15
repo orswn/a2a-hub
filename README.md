@@ -97,6 +97,7 @@ make verify
 - A `413` answer to a body that is larger than 1 MB has `Connection: close`, and Go's HTTP server closes the connection. The TypeScript hub keeps it open.
 - In A2A responses, the keys of struct values (`metadata` and data parts) are in sorted order: a2a-go decodes them into Go maps. The stored message, the link events, and the push payloads keep the order of the client. The TypeScript hub keeps the order of the client everywhere.
 - A JSON-RPC body that is a JSON string is parsed again, as in `@a2a-js/sdk`. When that fails, the error text is `Failed to parse JSON request.`. `@a2a-js/sdk` sends the text of the V8 `SyntaxError`.
+- JSON-RPC params with a wrong JSON type are refused with `-32602` and the text `Invalid method parameters.`. Examples: a string `historyLength`, a number `id`, a string `includeArtifacts` or `returnImmediately`, a role number outside the enum, or a part with no content. A string `pageSize` gets `pageSize must be between 1 and 100`. The hub log has the detail. The TypeScript hub coerces such values or ignores them.
 - The path splits into its non-empty segments with no other normalization. `GET //healthz` gets `200`, and `GET /x/../healthz` gets `404`. The TypeScript hub parses the request target as a WHATWG URL: `//healthz` names the host `healthz` and gets `404`, and `/x/../healthz` loses its dot segments and gets `200`.
 
 Known engine and push differences:

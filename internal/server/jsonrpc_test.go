@@ -1,7 +1,10 @@
 package server
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
 
 	"github.com/orswn/a2a-hub/internal/jsonx"
 )
@@ -67,5 +70,24 @@ func TestParseCallKeepsARoleNumberOutsideTheEnum(t *testing.T) {
 	}
 	if got := string(call.raw); got != `{"message":{"role":7}}` {
 		t.Errorf("params %s", got)
+	}
+}
+
+func TestParamsOfAWrongJSONTypeGetAFixedTextAndTheDetailGoesToTheLog(t *testing.T) {
+	var logged []string
+	s := &Server{log: func(line string) { logged = append(logged, line) }}
+	call := rpcCall{method: "GetTask", raw: []byte(`{"id":"t1","historyLength":"2"}`)}
+	_, err := decode[a2a.GetTaskRequest](call)
+	if err == nil {
+		t.Fatal("decode took a string historyLength")
+	}
+	got := string(jsonx.Stringify(s.callError(call, err)))
+	want := `{"code":-32602,"message":"Invalid method parameters.","data":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"INVALID_PARAMS","domain":"a2a-protocol.org"}]}`
+	if got != want {
+		t.Errorf("error %s", got)
+	}
+	if len(logged) != 1 || !strings.HasPrefix(logged[0], "a2a GetTask params refused: ") ||
+		!strings.Contains(logged[0], "historyLength") {
+		t.Errorf("log %q", logged)
 	}
 }

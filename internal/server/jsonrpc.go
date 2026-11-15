@@ -79,6 +79,22 @@ func rpcResponse(id any, key string, value any) *jsonx.Object {
 
 func malformed(message string) error { return a2a.NewError(a2a.ErrInvalidParams, message) }
 
+// paramsError keeps the decode detail for the log. The client gets a fixed text without Go type names.
+type paramsError struct{ detail string }
+
+func (e *paramsError) Error() string { return "Invalid method parameters." }
+
+func (e *paramsError) Unwrap() error { return a2a.ErrInvalidParams }
+
+// callError logs the detail of a params error and gives the JSON-RPC error object.
+func (s *Server) callError(call rpcCall, err error) *jsonx.Object {
+	var params *paramsError
+	if errors.As(err, &params) {
+		s.log("a2a " + call.method + " params refused: " + params.detail)
+	}
+	return rpcError(err)
+}
+
 func (s *Server) jsonRPC(w http.ResponseWriter, r *http.Request, ref string) error {
 	// Authenticate first, so an anonymous caller cannot learn which agents exist.
 	principal, anonymous, err := s.principal(r, s.isBuiltinRef(ref))
@@ -152,7 +168,7 @@ func (s *Server) jsonRPC(w http.ResponseWriter, r *http.Request, ref string) err
 	if call.method == "SendStreamingMessage" || call.method == "SubscribeToTask" {
 		events, err := streamCall(ctx, handler, call)
 		if err != nil {
-			writeJSON(w, http.StatusOK, rpcResponse(call.id, "error", rpcError(err)), nil)
+			writeJSON(w, http.StatusOK, rpcResponse(call.id, "error", s.callError(call, err)), nil)
 			return nil
 		}
 		s.writeStream(ctx, cancel, w, call.id, events)
@@ -166,7 +182,7 @@ func (s *Server) jsonRPC(w http.ResponseWriter, r *http.Request, ref string) err
 		}
 	}
 	if err != nil {
-		writeJSON(w, http.StatusOK, rpcResponse(call.id, "error", rpcError(err)), header)
+		writeJSON(w, http.StatusOK, rpcResponse(call.id, "error", s.callError(call, err)), header)
 		return nil
 	}
 	writeJSON(w, http.StatusOK, rpcResponse(call.id, "result", result), header)
@@ -302,7 +318,7 @@ func validID(request *jsonx.Object) bool {
 func decode[T any](call rpcCall) (*T, error) {
 	var out T
 	if err := json.Unmarshal(call.raw, &out); err != nil {
-		return nil, malformed("Invalid method parameters: " + err.Error())
+		return nil, &paramsError{detail: err.Error()}
 	}
 	return &out, nil
 }
