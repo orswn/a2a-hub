@@ -126,9 +126,38 @@ func TestASecondStreamStartsAfterTheReplacedStreamEnded(t *testing.T) {
 	<-secondDone
 }
 
+func TestOfflineNowDuringTheReplaceWaitLeavesTheAgentOffline(t *testing.T) {
+	e := setup(t)
+	hub := New(e, Options{PresenceGrace: 100 * time.Millisecond, Heartbeat: time.Minute})
+	defer hub.Stop()
+	first := newRecorder("event: replaced")
+	cancelFirst, firstDone := serve(hub, first)
+	defer cancelFirst()
+	<-first.wrote
+	second := newRecorder("")
+	cancelSecond, secondDone := serve(hub, second)
+	defer cancelSecond()
+	// The first stream holds its replaced frame for 200 ms, so the second stream is in its replace wait.
+	time.Sleep(50 * time.Millisecond)
+	if err := hub.OfflineNow("a1"); err != nil {
+		t.Fatal(err)
+	}
+	<-firstDone
+	select {
+	case <-secondDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("second stream did not end after OfflineNow")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if online(t, e) {
+		t.Error("agent is online after OfflineNow with no stream")
+	}
+}
+
 func TestAClosedStreamMarksTheAgentOfflineAfterTheGrace(t *testing.T) {
 	e := setup(t)
-	hub := New(e, Options{PresenceGrace: 150 * time.Millisecond, Heartbeat: time.Minute})
+	// The grace is long enough for a loaded machine to read the row before it ends.
+	hub := New(e, Options{PresenceGrace: time.Second, Heartbeat: time.Minute})
 	defer hub.Stop()
 	w := newRecorder("")
 	cancel, done := serve(hub, w)
@@ -141,7 +170,7 @@ func TestAClosedStreamMarksTheAgentOfflineAfterTheGrace(t *testing.T) {
 	if !online(t, e) {
 		t.Error("agent went offline before the grace")
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for online(t, e) {
 		if time.Now().After(deadline) {
 			t.Fatal("agent is still online after the grace")

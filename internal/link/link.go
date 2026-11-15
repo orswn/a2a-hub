@@ -91,6 +91,11 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, agentID string, afte
 		}
 	}
 	h.mu.Lock()
+	// OfflineNow, Stop, or a newer stream may have ended this stream during the wait.
+	if h.open[agentID] != current {
+		h.mu.Unlock()
+		return
+	}
 	h.cancelOffline(agentID)
 	online := h.engine.SetOnline(agentID, true)
 	h.mu.Unlock()
