@@ -4,6 +4,8 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-15
+
 ### Added
 
 - The MCP endpoint `/mcp` for the harnesses `claude-code`, `codex`, and `hermes`, with the tools `send`, `reply`, `inbox`, `set_status`, and `peers`. For `hermes`, `send.wait` returns the first reply.
