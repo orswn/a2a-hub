@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -404,5 +405,51 @@ func TestTheCardTakesTheSkillsOfTheAgentCard(t *testing.T) {
 			t.Fatal("no skills")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCancelTaskOutlivesTheEndOfTheDispatch(t *testing.T) {
+	h := setup(t)
+	cancelArrived := make(chan struct{})
+	var clientGone, answered atomic.Bool
+	server := agentServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case strings.Contains(string(body), "SendStreamingMessage"):
+			frames(w, `{"result":{"task":{"id":"r1","contextId":"c","status":{"state":"TASK_STATE_WORKING"}}}}`)
+			select {
+			case <-cancelArrived:
+			case <-r.Context().Done():
+				return
+			}
+			frames(w, `{"result":{"statusUpdate":{"taskId":"r1","status":{"state":"TASK_STATE_WORKING","message":{"parts":[{"text":"progress"}]}}}}}`)
+			<-r.Context().Done()
+		case strings.Contains(string(body), "CancelTask"):
+			close(cancelArrived)
+			select {
+			case <-time.After(300 * time.Millisecond):
+			case <-r.Context().Done():
+				clientGone.Store(true)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"id":"r1","status":{"state":"TASK_STATE_CANCELED"}}}`)
+			answered.Store(true)
+		}
+	})
+	h.gateway(server.URL, nil)
+	id := h.send("hello")
+	h.waitTask(id, engine.StateWorking)
+	if _, err := h.engine.Cancel("ext", hermes, id); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for !answered.Load() && !clientGone.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if clientGone.Load() || !answered.Load() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		t.Errorf("the hub aborted its own CancelTask request: answered=%v logs=%q", answered.Load(), h.logs)
 	}
 }

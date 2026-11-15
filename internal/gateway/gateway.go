@@ -1216,11 +1216,8 @@ func (g *Gateway) cancelJob(job engine.ExternalJob) {
 	r := g.running[job.TaskID]
 	g.mu.Unlock()
 	if agent != nil && remote != nil && remote.RemoteTaskID != nil && remote.State != "done" {
-		ctx := g.shutdown
-		if r != nil {
-			ctx = r.ctx
-		}
-		answer, err := g.rpc(ctx, agent, "CancelTask", jsonx.NewObject("id", *remote.RemoteTaskID))
+		// Not the dispatch context: a stream event that ends the dispatch must not abort the cancel request.
+		answer, err := g.rpc(g.shutdown, agent, "CancelTask", jsonx.NewObject("id", *remote.RemoteTaskID))
 		switch {
 		case err != nil:
 			g.log(fmt.Sprintf("external agent %s: CancelTask %s failed: %s", agent.ID, *remote.RemoteTaskID, explain(err)))
