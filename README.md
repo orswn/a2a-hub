@@ -8,15 +8,35 @@ This is the Go port of the hub that started inside [pimon](https://github.com/or
 
 What exists now:
 
-- The server binary `a2a-hub`: flags and env, token file, the sqlite store with the same schema (`user_version` 2), `GET /healthz` with the online agent count, and the `healthcheck` subcommand.
+- The server binary `a2a-hub`: flags and env, token file, the sqlite store (`user_version` 3), `GET /healthz` with the online agent count, and the `healthcheck` subcommand.
 - The routes of the TypeScript hub: the A2A 1.0 JSON-RPC endpoint and agent card of each agent at `/a2a/<agent>`, `/agents`, and the link API with its event streams, heartbeat, and presence.
 - The push sender: it posts each task event to the webhooks of the task, with retries after 1 s, 5 s, and 30 s. It checks the address of each webhook again on the socket that it opens.
 - The gateway to external A2A agents, such as Hermes: it sends their hub tasks with `SendStreamingMessage`, maps the stream back to the hub task, falls back to `GetTask` after a dropped stream or a restart, retries after a rate limit or a connect failure, sends `CancelTask`, and refreshes each agent card. `SIGHUP` reloads the external agents file.
 - The built-in test agents `tck` and `echo` of `--test-agents`. The a2a-tck conformance suite runs against `tck` in CI.
 - The engine (`internal/engine`): agents and host binding, `@name` resolution, the task lifecycle, context follow-ups, status text, open questions, task scope, task lists with page tokens, the mailbox events with replay and ack, retention, push configs and the push outbox, and the job and dispatch rows of external agents. It writes the same rows as the TypeScript engine, so either hub opens a file that the other wrote.
 - The push URL guard (`internal/pushguard`): the config-time and send-time address checks and the allow list.
-- The protocol package `@orswn/a2a-hub-protocol` with the JSON Schema of link protocol 2.
-- The black-box contract suite of the link protocol.
+- The protocol package `@orswn/a2a-hub-protocol` with the JSON Schema of link protocols 3 and 2.
+- The black-box contract suites of link protocols 3 and 2.
+
+## Agent kinds and protocol versions
+
+Every harness session registers as kind `session`. The label `harness` names the harness, such as `pi`, `claude-code`, or `codex`. External A2A agents have kind `external`, and the test agents have kind `builtin`.
+
+`POST /link/register` accepts protocol 3 and protocol 2. Another protocol gets `426` with `expected` (3) and `supported` (`[2,3]`).
+
+| | Protocol 3 | Protocol 2 |
+|---|---|---|
+| Register without `labels.harness` | `400`, unless the stored labels already have it | the hub sets `harness` to `pi` |
+| Agent header of an A2A call | `X-A2A-Agent` | `X-Pimon-Agent` |
+| Bus extension URI | `https://github.com/orswn/a2a-hub/bus/v1` | `https://github.com/orswn/pimon/a2a/bus/v1` |
+
+- The hub reads both agent headers. When a request has both with different values, it gets `400`.
+- The hub reads bus metadata under both URIs. The current URI wins when a message has both.
+- The delivery stamp of a send uses the URI of the request metadata.
+- The status text mark uses the protocol 2 URI, so that protocol 2 clients still find it.
+- `POST /link/<agent>/children` without `labels.harness` sets `harness` to `pi` in both protocols.
+- The card of a session agent says `<harness> session on <host>`. Its skill id stays `pi-session`.
+- Schema 3 renames the stored kind `pi` to `session` in `agents`, `messages.sender_kind`, and the `from.kind` of stored link events. Each renamed agent gets `harness` `pi`. The TypeScript hub cannot open a schema 3 file.
 
 Planned:
 
@@ -100,9 +120,9 @@ make verify
 ```
 
 - Go unit tests: `mise exec -- go test -race ./...`.
-- Database compatibility: the engine tests run one scenario that `internal/engine/testdata/compat.mjs` also runs with the TypeScript engine. Both must write the same rows, and the Go engine must read the committed TypeScript-written file in `testdata/compat-node` the same way. With `PIMON_DIR` set to a pimon checkout and `node` on `PATH`, the test also runs the TypeScript engine again and makes it read the file that the Go engine wrote.
-- Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that protocol 2 has not changed.
-- Contract suite: `npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema.
+- Database compatibility: the engine tests run one scenario that `internal/engine/testdata/compat.mjs` also runs with the TypeScript engine. After the schema 3 migration both files must hold the same rows, and the Go engine must read the committed TypeScript-written file in `testdata/compat-node` the same way. With `PIMON_DIR` set to a pimon checkout and `node` on `PATH`, the test also runs the TypeScript engine again and checks that it refuses the schema 3 file that the Go engine wrote.
+- Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that the files of earlier protocols have not changed.
+- Contract suite: `npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema of protocol 3. A reduced suite checks a protocol 2 client against the protocol 2 file.
 - Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, a restart, and external agents behind a fake A2A agent (`test/support/fake-hermes.ts`). With `HUB_BIN` set to a wrapper of the TypeScript hub, both suites also run against it.
 - Conformance: CI runs a2a-tck against `/a2a/tck` of a hub with `--test-agents`. `scripts/tck-gate.py` fails the job on a failed MUST requirement or fewer than 75 MUST passes. `scripts/hub-python-client.py` then sends a task with the Python A2A SDK.
 
@@ -139,4 +159,4 @@ Known engine and push differences:
 npm install --save-dev "git+ssh://git@github.com/orswn/a2a-hub.git#<tag>"
 ```
 
-Entry points: `@orswn/a2a-hub-protocol` (constants and types), `/schema`, `/routes`, and `/hub-protocol-v2.json`. The package is TypeScript source. `typebox` is a peer dependency.
+Entry points: `@orswn/a2a-hub-protocol` (constants and types), `/schema`, `/routes`, `/hub-protocol-v3.json`, and `/hub-protocol-v2.json`. The package is TypeScript source. `typebox` is a peer dependency.
