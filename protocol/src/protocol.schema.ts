@@ -180,7 +180,8 @@ export const ChildBody = Type.Object(
 		role: Type.Optional(Type.String()),
 		labels: Type.Optional(
 			Type.Record(Type.String(), Type.String(), {
-				description: "Without `harness`, the hub sets `harness` to `pi`, the harness of protocol 2.",
+				description:
+					"Without `harness`, the child gets the `harness` of its parent. When the parent has none, it gets `pi`, the harness of protocol 2.",
 			}),
 		),
 		cwd: Type.Optional(Type.String()),

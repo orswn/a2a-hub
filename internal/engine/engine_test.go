@@ -98,12 +98,12 @@ func TestRegisterWithProtocol3NeedsTheHarnessLabel(t *testing.T) {
 	}
 }
 
-func TestAddChildGivesAChildWithoutAHarnessTheLegacyHarness(t *testing.T) {
+func TestAddChildGivesAChildWithoutAHarnessTheHarnessOfItsParent(t *testing.T) {
 	h := setup(t)
-	h.register("parent")
-	got(h.engine.AddChild(mars, "parent", obj("id", "kid"))).ok(t)
+	h.register("parent", "labels", obj("harness", "claude-code", "team", "core"))
+	got(h.engine.AddChild(mars, "parent", obj("id", "kid", "labels", obj("team", "x")))).ok(t)
 	got(h.engine.AddChild(mars, "parent", obj("id", "coder", "labels", obj("harness", "codex")))).ok(t)
-	if labels := labelsOf(t, h, "kid"); labels != `{"harness":"`+LegacyHarness+`"}` {
+	if labels := labelsOf(t, h, "kid"); labels != `{"team":"x","harness":"claude-code"}` {
 		t.Errorf("kid labels = %s", labels)
 	}
 	if labels := labelsOf(t, h, "coder"); labels != `{"harness":"codex"}` {
@@ -111,6 +111,18 @@ func TestAddChildGivesAChildWithoutAHarnessTheLegacyHarness(t *testing.T) {
 	}
 	if kind := got(h.engine.RequireAgent("kid")).ok(t).Kind; kind != KindSession {
 		t.Errorf("kind = %s", kind)
+	}
+}
+
+func TestAddChildGivesTheLegacyHarnessWhenTheParentHasNone(t *testing.T) {
+	h := setup(t)
+	h.register("parent")
+	if err := h.engine.do(func() { h.engine.run("UPDATE agents SET labels = '{}' WHERE id = 'parent'") }); err != nil {
+		t.Fatal(err)
+	}
+	got(h.engine.AddChild(mars, "parent", obj("id", "kid"))).ok(t)
+	if labels := labelsOf(t, h, "kid"); labels != `{"harness":"`+LegacyHarness+`"}` {
+		t.Errorf("kid labels = %s", labels)
 	}
 }
 

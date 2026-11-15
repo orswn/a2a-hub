@@ -235,7 +235,11 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 		cwd := firstOf(givenCwd, existing.Cwd)
 		role := firstOf(givenRole, existing.Role)
 		parent := firstOf(givenParent, existing.Parent)
-		labels := withHarness(deref(firstOf(givenLabels, &existing.Labels)), protocol == LegacyProtocol)
+		fallback := ""
+		if protocol == LegacyProtocol {
+			fallback = LegacyHarness
+		}
+		labels := withHarness(deref(firstOf(givenLabels, &existing.Labels)), fallback)
 		topics := deref(firstOf(givenTopics, &existing.Topics))
 		ephemeral := existing.Ephemeral
 		if givenEphemeral != nil {
@@ -254,8 +258,6 @@ func (e *Engine) register(principal auth.Principal, body *jsonx.Object) Register
 	})
 }
 
-// withHarness checks that session labels name the harness. A protocol 2 client and a child row may leave it out:
-// they get the harness of protocol 2.
 // protocolList names the protocols as "2 or 3", or as "1, 2, or 3" for three or more.
 func protocolList(protocols []int) string {
 	names := make([]string, len(protocols))
@@ -271,18 +273,27 @@ func protocolList(protocols []int) string {
 	return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
 }
 
-func withHarness(labels string, legacy bool) string {
+// harnessOf is the harness label of stored labels, or "" when they have none.
+func harnessOf(labels string) string {
 	obj, _ := mustParse(labels).(*jsonx.Object)
-	if name, _ := obj.String(HarnessLabel); name != "" {
+	name, _ := obj.String(HarnessLabel)
+	return name
+}
+
+// withHarness checks that session labels name the harness. Without it, they get fallback, and an empty fallback
+// refuses them.
+func withHarness(labels, fallback string) string {
+	if harnessOf(labels) != "" {
 		return labels
 	}
-	if !legacy {
+	if fallback == "" {
 		throw(ReasonInvalid, "labels.%s is required with hub protocol %d", HarnessLabel, HubProtocol)
 	}
+	obj, _ := mustParse(labels).(*jsonx.Object)
 	if obj == nil {
 		obj = &jsonx.Object{}
 	}
-	return stringify(obj.Set(HarnessLabel, LegacyHarness))
+	return stringify(obj.Set(HarnessLabel, fallback))
 }
 
 func existingName(row *AgentRow) *string {
@@ -314,8 +325,14 @@ func (e *Engine) AddChild(principal auth.Principal, parentID string, body any) (
 		name := deref(firstOf(optionalString(obj.Value("name"), "name", 128), strPtr(DefaultAgentName(principal.Name, id))))
 		cwd := optionalString(obj.Value("cwd"), "cwd", 4096)
 		role := optionalString(obj.Value("role"), "role", 256)
-		labels := withHarness(stringify(labelMap(obj.Value("labels"))), true)
+		givenLabels := stringify(labelMap(obj.Value("labels")))
 		return txValue(e, func() RegisterResult {
+			// A child runs in the harness of its parent unless the body names another one.
+			fallback := LegacyHarness
+			if parent := e.agent(parentID); parent != nil && harnessOf(parent.Labels) != "" {
+				fallback = harnessOf(parent.Labels)
+			}
+			labels := withHarness(givenLabels, fallback)
 			existing := e.agent(id)
 			at := e.iso()
 			if existing != nil {

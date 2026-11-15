@@ -242,7 +242,7 @@
 					"type": "string"
 				},
 				"labels": {
-					"description": "Without `harness`, the hub sets `harness` to `pi`, the harness of protocol 2.",
+					"description": "Without `harness`, the child gets the `harness` of its parent. When the parent has none, it gets `pi`, the harness of protocol 2.",
 					"type": "object",
 					"patternProperties": {
 						"^.*$": {

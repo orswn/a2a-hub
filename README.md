@@ -34,7 +34,7 @@ Every harness session registers as kind `session`. The label `harness` names the
 - The hub reads bus metadata under both URIs. The current URI wins when a message has both.
 - The delivery stamp of a send uses the URI of the request metadata.
 - The status text mark uses the protocol 2 URI, so that protocol 2 clients still find it.
-- `POST /link/<agent>/children` without `labels.harness` sets `harness` to `pi` in both protocols.
+- `POST /link/<agent>/children` without `labels.harness` gives the child the `harness` of its parent, else `pi`.
 - The card of a session agent says `<harness> session on <host>`. Its skill id stays `pi-session`.
 - Schema 3 renames the stored kind `pi` to `session` in `agents`, `messages.sender_kind`, and the `from.kind` of stored link events. Each renamed agent gets `harness` `pi`. The TypeScript hub cannot open a schema 3 file.
 

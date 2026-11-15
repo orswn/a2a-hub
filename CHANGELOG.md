@@ -14,7 +14,7 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 - The agent kind `pi` is now `session`. Schema 3 renames it in agents, message senders, and stored link events. Each renamed agent gets `harness` `pi`. The TypeScript hub cannot open a schema 3 file.
 - The card of a session agent says `<harness> session on <host>`. The skill id stays `pi-session`.
-- Register also accepts protocol 2. A protocol 2 register and a child without a harness get `harness` `pi`. The hub still reads `X-Pimon-Agent` and the pimon bus extension URI, and answers a send under the URI that the request used.
+- Register also accepts protocol 2. A protocol 2 register without a harness gets `harness` `pi`. A child without a harness gets the harness of its parent, else `pi`. The hub still reads `X-Pimon-Agent` and the pimon bus extension URI, and answers a send under the URI that the request used.
 
 ## [1.0.0] - 2026-11-15
 
