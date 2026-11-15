@@ -4,6 +4,8 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-15
+
 ### Added
 
 - The host CLI `a2a` with the commands `claude-hook`, `claude-headers`, `mcp`, `codex`, `codex-server`, `codex-adapter`, and `version`. `a2a codex` passes the terminal cwd with `-C` unless the user gives `-C` or `--cd`.
