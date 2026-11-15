@@ -7,7 +7,7 @@ export const BusKind = Type.Enum(BUS_KINDS, { title: "BusKind" });
 export const Wake = Type.Enum(["now", "never"], { title: "Wake" });
 export const Priority = Type.Enum(["normal", "important", "urgent"], { title: "Priority" });
 export const DeliveryState = Type.Enum(["delivered", "queued", "unconfirmed"], { title: "DeliveryState" });
-export const AgentKind = Type.Enum(["pi", "external", "builtin"], { title: "AgentKind" });
+export const AgentKind = Type.Enum(["session", "external", "builtin"], { title: "AgentKind" });
 export const PrincipalKind = Type.Enum(["host", "peer"], { title: "PrincipalKind" });
 export const AgentState = Type.Enum(["busy", "idle"], { title: "AgentState" });
 export const LinkTaskState = Type.Enum(LINK_TASK_STATES, { title: "LinkTaskState" });
@@ -16,6 +16,18 @@ export const LinkPostState = Type.Enum(["working", "input-required", "completed"
 });
 
 const Labels = Type.Record(Type.String(), Type.String());
+
+export const SessionLabels = Type.Intersect(
+	[
+		Type.Object({ harness: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
+		Type.Record(Type.String(), Type.String()),
+	],
+	{
+		title: "SessionLabels",
+		description:
+			"Labels of a session agent. `harness` names its harness, such as `pi`, `claude-code`, or `codex`. A register that leaves `labels` out keeps the stored labels, so they must already hold `harness`.",
+	},
+);
 const AgentRef = Type.Object({ agent: Type.String(), name: Type.String() });
 const Nullable = <T extends TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 
@@ -111,11 +123,11 @@ export const RegisterBody = Type.Object(
 		name: Type.Optional(Type.String()),
 		cwd: Type.Optional(Type.String()),
 		role: Type.Optional(Type.String()),
-		labels: Type.Optional(Labels),
+		labels: Type.Optional(SessionLabels),
 		parent: Type.Optional(Type.String()),
 		topics: Type.Optional(Type.Array(Type.String())),
 		ephemeral: Type.Optional(Type.Boolean()),
-		protocol: Type.Integer(),
+		protocol: Type.Integer({ description: "`HUB_PROTOCOL`. The hub also accepts 2 from older clients." }),
 	},
 	{ title: "RegisterBody" },
 );
@@ -166,7 +178,11 @@ export const ChildBody = Type.Object(
 		id: Type.String(),
 		name: Type.Optional(Type.String()),
 		role: Type.Optional(Type.String()),
-		labels: Type.Optional(Labels),
+		labels: Type.Optional(
+			Type.Record(Type.String(), Type.String(), {
+				description: "Without `harness`, the hub sets `harness` to `pi`, the harness of protocol 2.",
+			}),
+		),
 		cwd: Type.Optional(Type.String()),
 	},
 	{ title: "ChildBody" },
@@ -313,7 +329,11 @@ export const UpdatedTaskResult = Type.Object(
 export const ErrorBody = Type.Object({ error: Type.String() }, { title: "ErrorBody" });
 
 export const UpgradeErrorBody = Type.Object(
-	{ error: Type.String(), expected: Type.Integer({ description: "The protocol that the hub speaks." }) },
+	{
+		error: Type.String(),
+		expected: Type.Integer({ description: "The protocol that the hub speaks." }),
+		supported: Type.Array(Type.Integer(), { description: "Every protocol that register accepts." }),
+	},
 	{ title: "UpgradeErrorBody" },
 );
 

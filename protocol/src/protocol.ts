@@ -1,9 +1,11 @@
 import type { Static } from "typebox";
 import type * as S from "./protocol.schema.ts";
 
-export const HUB_PROTOCOL = 2;
-export const BUS_EXTENSION_URI = "https://github.com/orswn/pimon/a2a/bus/v1";
-export const AGENT_HEADER = "x-pimon-agent";
+export const HUB_PROTOCOL = 3;
+export const BUS_EXTENSION_URI = "https://github.com/orswn/a2a-hub/bus/v1";
+export const AGENT_HEADER = "x-a2a-agent";
+/** The label that names the harness of a session agent, such as `pi`, `claude-code`, or `codex`. */
+export const HARNESS_LABEL = "harness";
 
 export const BUS_KINDS = ["note", "question", "answer", "task", "result", "correction", "status", "event"] as const;
 export type BusKind = (typeof BUS_KINDS)[number];
@@ -17,6 +19,7 @@ export type DeliveryState = Static<typeof S.DeliveryState>;
 export type BusMetadata = Static<typeof S.BusMetadata>;
 
 export type AgentKind = Static<typeof S.AgentKind>;
+export type SessionLabels = Static<typeof S.SessionLabels>;
 export type PrincipalKind = Static<typeof S.PrincipalKind>;
 export type AgentState = Static<typeof S.AgentState>;
 

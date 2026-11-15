@@ -17,7 +17,8 @@ interface BusMetadata {
 	data?: unknown;
 }
 
-type AgentKind = "pi" | "external" | "builtin";
+type AgentKind = "session" | "external" | "builtin";
+type SessionLabels = { harness: string } & Record<string, string>;
 type PrincipalKind = "host" | "peer";
 type AgentState = "busy" | "idle";
 
@@ -86,7 +87,7 @@ interface RegisterBody {
 	name?: string;
 	cwd?: string;
 	role?: string;
-	labels?: Record<string, string>;
+	labels?: SessionLabels;
 	parent?: string;
 	topics?: string[];
 	ephemeral?: boolean;
@@ -207,13 +208,14 @@ interface Health {
 }
 
 describe("hub protocol types", () => {
-	it("derive from the schemas without a change to the earlier interfaces", () => {
+	it("derive from the schemas and match the protocol 3 interfaces", () => {
 		expectTypeOf<P.BusKind>().toEqualTypeOf<BusKind>();
 		expectTypeOf<P.Wake>().toEqualTypeOf<Wake>();
 		expectTypeOf<P.Priority>().toEqualTypeOf<Priority>();
 		expectTypeOf<P.DeliveryState>().toEqualTypeOf<DeliveryState>();
 		expectTypeOf<Omit<P.BusMetadata, "delivery" | "statusText">>().toEqualTypeOf<BusMetadata>();
 		expectTypeOf<P.AgentKind>().toEqualTypeOf<AgentKind>();
+		expectTypeOf<P.SessionLabels>().toEqualTypeOf<SessionLabels>();
 		expectTypeOf<P.PrincipalKind>().toEqualTypeOf<PrincipalKind>();
 		expectTypeOf<P.AgentState>().toEqualTypeOf<AgentState>();
 		expectTypeOf<P.LinkTaskState>().toEqualTypeOf<LinkTaskState>();

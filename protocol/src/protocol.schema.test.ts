@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderHubSchema, SCHEMA_FILE } from "../scripts/hub-schema.ts";
+import { BUS_EXTENSION_URI, HUB_PROTOCOL } from "./protocol.ts";
 import * as S from "./protocol.schema.ts";
 
 /**
@@ -23,6 +24,13 @@ describe("hub protocol schema", () => {
 	it("keeps the protocol 2 file byte-identical to the published one", () => {
 		const file = join(import.meta.dirname, "../schema/hub-protocol-v2.json");
 		expect(createHash("sha256").update(readFileSync(file)).digest("hex")).toBe(PUBLISHED_V2_SHA256);
+	});
+
+	it("names the protocol and the bus extension URI of this package", () => {
+		const document = JSON.parse(readFileSync(SCHEMA_FILE, "utf8")) as Record<string, unknown>;
+		expect(HUB_PROTOCOL).toBe(3);
+		expect(document["$id"]).toBe("urn:a2a-hub:protocol:3");
+		expect(document["x-bus-extension-uri"]).toBe(BUS_EXTENSION_URI);
 	});
 
 	it("resolves each $ref to a definition", () => {
