@@ -216,3 +216,120 @@ func TestHeartbeatWritesAComment(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// noteSink writes only note messages and acks every event.
+type noteSink struct{}
+
+func (noteSink) Frame(event engine.LinkEvent) ([]byte, bool) {
+	if !bytes.Contains(event.Payload, []byte(`"kind":"note"`)) {
+		return nil, true
+	}
+	return append([]byte("data: "), append(event.Payload, "\n\n"...)...), true
+}
+
+func (noteSink) Replaced() []byte { return nil }
+
+func TestServeWithWritesTheSinkFramesAndAcksWrittenAndSkippedEvents(t *testing.T) {
+	e := setup(t)
+	hub := New(e, Options{PresenceGrace: time.Minute, Heartbeat: time.Minute})
+	defer hub.Stop()
+	send := func(id, kind string) {
+		t.Helper()
+		msg := jsonx.NewObject("messageId", id, "role", "ROLE_USER", "parts", []any{jsonx.NewObject("text", id)},
+			"metadata", jsonx.NewObject(engine.BusExtensionURI, jsonx.NewObject("kind", kind)))
+		if _, err := e.Send(engine.SendInput{AgentID: "a1", Caller: engine.Caller{Principal: auth.Principal{Name: "hermes", Kind: auth.KindPeer}}, Message: msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send("replayed", "note")
+	send("skipped", "status")
+	w := newRecorder("")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		hub.ServeWith(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/mcp", nil), "a1", nil, noteSink{})
+		close(done)
+	}()
+	send("live", "note")
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(w.text(), `"messageId":"live"`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no live frame: %q", w.text())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for {
+		unacked, err := e.Unacked("a1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(unacked) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("unacked = %+v", unacked)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if text := w.text(); !strings.Contains(text, `"messageId":"replayed"`) || strings.Contains(text, `"messageId":"skipped"`) {
+		t.Errorf("stream = %q", text)
+	}
+	cancel()
+	<-done
+}
+
+type replacedSink struct{ replaced chan struct{} }
+
+func (replacedSink) Frame(engine.LinkEvent) ([]byte, bool) { return nil, true }
+
+func (s replacedSink) Replaced() []byte {
+	close(s.replaced)
+	return nil
+}
+
+func TestServeWithTellsTheSinkOnlyWhenANewerStreamReplacesIt(t *testing.T) {
+	e := setup(t)
+	hub := New(e, Options{PresenceGrace: time.Minute, Heartbeat: time.Minute})
+	defer hub.Stop()
+	if hub.Open("a1") {
+		t.Fatal("open before any stream")
+	}
+	first := replacedSink{replaced: make(chan struct{})}
+	w := newRecorder("")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	firstDone := make(chan struct{})
+	go func() {
+		hub.ServeWith(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/mcp", nil), "a1", nil, first)
+		close(firstDone)
+	}()
+	<-w.wrote
+	if !hub.Open("a1") {
+		t.Fatal("not open with a stream")
+	}
+	second := replacedSink{replaced: make(chan struct{})}
+	w2 := newRecorder("")
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	secondDone := make(chan struct{})
+	go func() {
+		hub.ServeWith(w2, httptest.NewRequestWithContext(ctx2, http.MethodGet, "/mcp", nil), "a1", nil, second)
+		close(secondDone)
+	}()
+	<-firstDone
+	select {
+	case <-first.replaced:
+	default:
+		t.Error("the replaced stream was not told")
+	}
+	<-w2.wrote
+	cancel2()
+	<-secondDone
+	select {
+	case <-second.replaced:
+		t.Error("a stream that its client closed was told it was replaced")
+	default:
+	}
+	if hub.Open("a1") {
+		t.Error("open after the last stream ended")
+	}
+}

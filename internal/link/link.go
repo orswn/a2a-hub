@@ -72,9 +72,29 @@ func Frame(event engine.LinkEvent) []byte {
 	return append(out, "\n\n"...)
 }
 
+// Sink frames the events of one stream in its own wire format.
+type Sink interface {
+	// Frame gives the bytes of an event, or nil to skip it. ack true makes the hub ack the event after a
+	// successful write, or at once for a skipped event.
+	Frame(event engine.LinkEvent) (frame []byte, ack bool)
+	// Replaced is called once when a newer stream replaces this one. It gives the last frame; nil writes none.
+	Replaced() []byte
+}
+
+type linkSink struct{}
+
+func (linkSink) Frame(event engine.LinkEvent) ([]byte, bool) { return Frame(event), false }
+
+func (linkSink) Replaced() []byte { return []byte("event: replaced\ndata: {}\n\n") }
+
 // Serve streams the events of an agent until the client goes, a newer stream replaces it, or the agent goes
 // offline. afterSeq is the last seq the client holds; the ack stays the durable read mark.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, agentID string, afterSeq *int64) {
+	h.ServeWith(w, r, agentID, afterSeq, linkSink{})
+}
+
+// ServeWith is Serve with the framing of sink. A stream of any framing replaces the open stream of the agent.
+func (h *Hub) ServeWith(w http.ResponseWriter, r *http.Request, agentID string, afterSeq *int64, sink Sink) {
 	current := &stream{stop: make(chan string, 1), done: make(chan struct{})}
 	defer close(current.done)
 	h.mu.Lock()
@@ -139,8 +159,20 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, agentID string, afte
 		return
 	}
 	defer stream.Close()
+	deliver := func(event engine.LinkEvent) bool {
+		frame, ack := sink.Frame(event)
+		if frame != nil && !write(frame) {
+			return false
+		}
+		if ack {
+			if _, err := h.engine.Ack(agentID, float64(event.Seq)); err != nil {
+				h.opts.Log("link ack failed: " + err.Error())
+			}
+		}
+		return true
+	}
 	for _, event := range stream.Replay {
-		if !write(Frame(event)) {
+		if !deliver(event) {
 			return
 		}
 	}
@@ -149,7 +181,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, agentID string, afte
 	for {
 		select {
 		case event, ok := <-stream.Events:
-			if !ok || !write(Frame(event)) {
+			if !ok || !deliver(event) {
 				return
 			}
 		case <-heartbeat.C:
@@ -158,13 +190,23 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, agentID string, afte
 			}
 		case reason := <-current.stop:
 			if reason == "replaced" {
-				write([]byte("event: replaced\ndata: {}\n\n"))
+				if frame := sink.Replaced(); frame != nil {
+					write(frame)
+				}
 			}
 			return
 		case <-r.Context().Done():
 			return
 		}
 	}
+}
+
+// Open reports whether the agent has an open stream.
+func (h *Hub) Open(agentID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, open := h.open[agentID]
+	return open
 }
 
 // OfflineNow ends the stream of an agent whose process quit and marks it offline at once. The mailbox stays.
