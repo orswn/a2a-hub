@@ -21,6 +21,7 @@ import (
 	"github.com/orswn/a2a-hub/internal/config"
 	"github.com/orswn/a2a-hub/internal/engine"
 	"github.com/orswn/a2a-hub/internal/link"
+	"github.com/orswn/a2a-hub/internal/push"
 	"github.com/orswn/a2a-hub/internal/pushguard"
 	"github.com/orswn/a2a-hub/internal/server"
 	"github.com/orswn/a2a-hub/internal/store"
@@ -110,6 +111,9 @@ func serve(cfg config.Config, log func(string), stdout io.Writer, signals <-chan
 		}
 	}
 	links.Start(online)
+	sender := push.New(hubEngine, push.Options{Guard: guard, Log: log})
+	sender.Start()
+	defer sender.Stop()
 	if _, err := hubEngine.Sweep(); err != nil {
 		return err
 	}
