@@ -456,13 +456,20 @@ func (g *Gateway) getCard(agent *external.Agent) ([]*jsonx.Object, error) {
 	return ParseSkills(card), nil
 }
 
+// errTooLarge is the error of an answer or stream event over BodyLimit.
+var errTooLarge = fmt.Errorf("answer is larger than %d bytes", BodyLimit)
+
+func tooLarge(agent *external.Agent) outcome {
+	return outcome{failed, agent.Name + " answer is larger than 4 MiB"}
+}
+
 func readLimited(body io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(body, BodyLimit+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(data) > BodyLimit {
-		return nil, fmt.Errorf("answer is larger than %d bytes", BodyLimit)
+		return nil, errTooLarge
 	}
 	return data, nil
 }
@@ -875,7 +882,10 @@ func (g *Gateway) send(agent *external.Agent, remote *engine.RemoteTask, context
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("Content-Type"), "text/event-stream") {
-		data, _ := readLimited(res.Body)
+		data, err := readLimited(res.Body)
+		if errors.Is(err, errTooLarge) && res.StatusCode == http.StatusOK {
+			return tooLarge(agent)
+		}
 		var rpcErr *jsonx.Object
 		if parsed, err := jsonx.Parse(data); err == nil {
 			envelope, _ := parsed.(*jsonx.Object)
@@ -908,13 +918,15 @@ func (g *Gateway) readStream(agent *external.Agent, remote *engine.RemoteTask, b
 		if n > 0 {
 			idle.Reset(agent.Idle)
 			for _, frame := range parser.Push(buf[:n]) {
+				if len(frame.Data) > BodyLimit {
+					return tooLarge(agent)
+				}
 				if result, done := g.frame(agent, remote, frame, &artifacts); done {
 					return result
 				}
 			}
 			if parser.Buffered() > BodyLimit {
-				g.log(fmt.Sprintf("external agent %s: event is larger than %d bytes", agent.ID, BodyLimit))
-				return outcome{kind: drop}
+				return tooLarge(agent)
 			}
 		}
 		if err != nil {
@@ -1191,6 +1203,11 @@ func (g *Gateway) recover(agent *external.Agent, remote *engine.RemoteTask, r *r
 			g.log("external agent " + agent.ID + ": GetTask failed: " + explain(err))
 		}
 		if g.handleStop(r, remote) {
+			return
+		}
+		if errors.Is(err, errTooLarge) {
+			check(g.engine.RemoteDone(remote))
+			g.fail(remote.TaskID, tooLarge(agent).detail)
 			return
 		}
 		check(g.engine.RemotePolled(remote))

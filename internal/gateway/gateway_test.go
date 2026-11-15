@@ -584,3 +584,34 @@ func TestStopClosesTheIdleConnectionOfTheCardFetch(t *testing.T) {
 		t.Errorf("%d goroutines, %d before", n, before)
 	}
 }
+
+func TestAnAnswerOverTheLimitFailsTheTaskAtOnce(t *testing.T) {
+	big := strings.Repeat("x", BodyLimit+1)
+	cases := map[string]func(w http.ResponseWriter, body string){
+		"stream event": func(w http.ResponseWriter, _ string) {
+			frames(w, `{"result":{"message":{"parts":[{"text":"`+big+`"}]}}}`)
+		},
+		"GetTask answer": func(w http.ResponseWriter, body string) {
+			if strings.Contains(body, "SendStreamingMessage") {
+				frames(w, `{"result":{"task":{"id":"r1","status":{"state":"TASK_STATE_WORKING"}}}}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"id":"r1","status":{"state":"TASK_STATE_COMPLETED"},"x":"`+big+`"}}`)
+		},
+	}
+	for name, answer := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := setup(t)
+			server := agentServer(t, func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				answer(w, string(body))
+			})
+			h.gateway(server.URL, nil)
+			task := h.waitTask(h.send("hello"), engine.StateFailed)
+			if got := statusText(task); got != "ext answer is larger than 4 MiB" {
+				t.Errorf("status text %q", got)
+			}
+		})
+	}
+}

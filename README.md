@@ -119,7 +119,7 @@ make verify
 Known gateway differences:
 
 - Requests to external agents have the headers of Go's HTTP client: `User-Agent: Go-http-client/1.1` and `Accept-Encoding: gzip`. The TypeScript hub sends the headers of Node `fetch`: `User-Agent: node`, `Accept-Encoding: gzip, deflate`, `Accept-Language: *`, and `Sec-Fetch-Mode: cors`. The A2A headers and bodies are the same.
-- A JSON answer or one stream event of an external agent may be at most 4 MiB. A larger stream event counts as a dropped stream. The TypeScript hub has no limit.
+- A JSON answer or one stream event of an external agent may be at most 4 MiB. A larger answer fails the task at once with `<name> answer is larger than 4 MiB`. The TypeScript hub has no limit.
 - The error text of a connect failure is Go's text, such as `dial tcp 127.0.0.1:9: connect: connection refused (ECONNREFUSED)`. The TypeScript hub gives `fetch failed (ECONNREFUSED)`. Both name the same error code.
 - A link stream whose client falls 10,000 events behind ends, and the client gets the events in its replay when it reconnects. The TypeScript hub buffers without a limit.
 - A bad external agents file at start prints the error text. The TypeScript hub prints the stack trace.
