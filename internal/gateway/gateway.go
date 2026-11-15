@@ -120,6 +120,7 @@ type Gateway struct {
 	client         *http.Client
 	log            func(string)
 	connectTimeout time.Duration
+	ownClient      bool
 	wake           chan struct{}
 	shutdown       context.Context
 	cancel         context.CancelFunc
@@ -156,6 +157,7 @@ func New(e *engine.Engine, opts Options) *Gateway {
 	}
 	if g.client == nil {
 		g.client = NewClient(g.connectTimeout)
+		g.ownClient = true
 	}
 	g.shutdown, g.cancel = context.WithCancel(context.Background())
 	return g
@@ -301,6 +303,9 @@ func (g *Gateway) Stop() {
 	}
 	g.cancel()
 	g.wg.Wait()
+	if g.ownClient {
+		g.client.CloseIdleConnections()
+	}
 }
 
 // goRun runs fn in a goroutine that Stop waits for. It reports false after Stop.
@@ -337,11 +342,16 @@ func (g *Gateway) setOnline(agent *external.Agent, online bool) {
 	g.presenceMu.Lock()
 	defer g.presenceMu.Unlock()
 	g.mu.Lock()
-	current := g.agents[agent.ID] == agent && !g.stopped
+	current := sameAgent(g.agents[agent.ID], agent) && !g.stopped
 	g.mu.Unlock()
 	if current {
 		check(g.engine.SetOnline(agent.ID, online))
 	}
+}
+
+// sameAgent reports whether a reload kept the agent at the same URL.
+func sameAgent(current, agent *external.Agent) bool {
+	return current != nil && current.ID == agent.ID && current.URL == agent.URL
 }
 
 // ---------- cards ----------
@@ -650,10 +660,13 @@ func (g *Gateway) dispatch(job engine.ExternalJob) {
 		g.log(fmt.Sprintf("external job %d: message %s of task %s is gone", job.ID, messageID, job.TaskID))
 		return
 	}
-	remote := must(g.engine.StartRemote(job))
-	r := g.track(remote)
-	defer g.untrack(r)
+	r := g.track(job.TaskID, job.AgentID)
 	if r == nil {
+		return
+	}
+	defer g.untrack(r)
+	remote := must(g.engine.StartRemote(job))
+	if !g.stillDue(r, remote, job, agent) {
 		return
 	}
 	messageID := g.engine.NewID()
@@ -682,17 +695,43 @@ func (g *Gateway) dispatch(job engine.ExternalJob) {
 	}
 }
 
-// track registers a running dispatch. It returns nil after Stop, and the rows stay for the next start.
-func (g *Gateway) track(remote *engine.RemoteTask) *running {
+// track registers a running dispatch before its row is written, so a cancel, a reload, or a stop finds it.
+// It returns nil after Stop, and the rows stay for the next start.
+func (g *Gateway) track(taskID, agentID string) *running {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.stopped {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(g.shutdown)
-	r := &running{taskID: remote.TaskID, agentID: remote.AgentID, ctx: ctx, cancel: cancel}
-	g.running[remote.TaskID] = r
+	r := &running{taskID: taskID, agentID: agentID, ctx: ctx, cancel: cancel}
+	g.running[taskID] = r
 	return r
+}
+
+// stillDue checks the dispatch again after StartRemote: the job was read without a lock, so a stop, a cancel,
+// or a reload may have come in between. A stop or a changed agent puts the job back, as nothing was sent.
+func (g *Gateway) stillDue(r *running, remote *engine.RemoteTask, job engine.ExternalJob, agent *external.Agent) bool {
+	g.mu.Lock()
+	stopped := g.stopped || r.reason == reasonStop
+	current := g.agents[job.AgentID]
+	g.mu.Unlock()
+	if stopped {
+		check(g.engine.RequeueRemote(remote, job))
+		return false
+	}
+	if g.handleStop(r, remote) {
+		return false
+	}
+	if state := must(g.engine.TaskState(job.TaskID)); state == "" || engine.IsTerminal(state) {
+		check(g.engine.RemoteDone(remote))
+		return false
+	}
+	if current != agent {
+		check(g.engine.RequeueRemote(remote, job))
+		return false
+	}
+	return true
 }
 
 func (g *Gateway) untrack(r *running) {
@@ -1103,7 +1142,7 @@ func (g *Gateway) resume(remote *engine.RemoteTask) {
 		})
 		return
 	}
-	r := g.track(remote)
+	r := g.track(remote.TaskID, remote.AgentID)
 	if r == nil {
 		return
 	}

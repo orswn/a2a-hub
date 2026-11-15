@@ -370,7 +370,6 @@ func TestStopEndsOpenStreamsAndLeavesNoGoroutine(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Stop did not return")
 	}
-	g.client.CloseIdleConnections()
 	deadline := time.Now().Add(2 * time.Second)
 	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -451,5 +450,137 @@ func TestCancelTaskOutlivesTheEndOfTheDispatch(t *testing.T) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		t.Errorf("the hub aborted its own CancelTask request: answered=%v logs=%q", answered.Load(), h.logs)
+	}
+}
+
+func (h *harness) online(id string) bool {
+	h.t.Helper()
+	agents, err := h.engine.ListAgents(true)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	for _, agent := range agents {
+		if agent.ID == id {
+			return agent.Online
+		}
+	}
+	return false
+}
+
+func TestADispatchChecksItsJobAgainAfterItWroteTheDispatchRow(t *testing.T) {
+	agent := func(url string) external.Agent {
+		return external.Agent{ID: "ext", Name: "ext", URL: url, Token: "t", Description: "d",
+			Poll: time.Hour, CardTTL: time.Hour, ReplyTimeout: time.Hour, Idle: time.Hour, Retry: time.Hour, Offline: time.Hour}
+	}
+	cases := []struct {
+		name    string
+		between func(h *harness, g *Gateway, taskID string)
+		queued  bool
+		remote  string
+		state   engine.State
+	}{
+		{"stop", func(_ *harness, g *Gateway, _ string) { g.Stop() }, true, "", engine.StateSubmitted},
+		{"reload with a new URL", func(_ *harness, g *Gateway, _ string) {
+			g.Configure([]external.Agent{agent("http://127.0.0.1:2/")})
+		}, true, "", engine.StateSubmitted},
+		{"agent removed", func(_ *harness, g *Gateway, _ string) { g.Configure(nil) }, false, "done", engine.StateFailed},
+		{"task canceled", func(h *harness, _ *Gateway, taskID string) {
+			if _, err := h.engine.Cancel("ext", hermes, taskID); err != nil {
+				h.t.Fatal(err)
+			}
+		}, false, "done", engine.StateCanceled},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := setup(t)
+			g := New(h.engine, Options{Log: h.log})
+			t.Cleanup(g.Stop)
+			current := agent("http://127.0.0.1:1/")
+			g.Configure([]external.Agent{current})
+			taskID := h.send("hello")
+			jobs, err := h.engine.ExternalJobs()
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("jobs %+v %v", jobs, err)
+			}
+			g.mu.Lock()
+			configured := g.agents["ext"]
+			g.mu.Unlock()
+			r := g.track(taskID, "ext")
+			remote, err := h.engine.StartRemote(jobs[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.between(h, g, taskID)
+			if g.stillDue(r, remote, jobs[0], configured) {
+				t.Fatal("the dispatch went on")
+			}
+			g.untrack(r)
+			jobs, _ = h.engine.ExternalJobs()
+			sends := 0
+			for _, job := range jobs {
+				if job.Op == "send" {
+					sends++
+				}
+			}
+			if queued := sends == 1; queued != c.queued {
+				t.Errorf("send job queued %v, want %v", queued, c.queued)
+			}
+			latest, _ := h.engine.LatestRemote(taskID)
+			switch {
+			case c.remote == "" && latest != nil:
+				t.Errorf("dispatch row left: %+v", latest)
+			case c.remote != "" && (latest == nil || latest.State != c.remote):
+				t.Errorf("dispatch row %+v, want %s", latest, c.remote)
+			}
+			if state, _ := h.engine.TaskState(taskID); state != c.state {
+				t.Errorf("task %s, want %s", state, c.state)
+			}
+		})
+	}
+}
+
+func TestAReloadThatKeepsTheAgentKeepsItsPresenceWrites(t *testing.T) {
+	h := setup(t)
+	g := New(h.engine, Options{Log: h.log})
+	t.Cleanup(g.Stop)
+	agent := external.Agent{ID: "ext", Name: "ext", URL: "http://127.0.0.1:1/", Token: "t", Description: "d"}
+	g.Configure([]external.Agent{agent})
+	g.mu.Lock()
+	before := g.agents["ext"]
+	g.mu.Unlock()
+	g.Configure([]external.Agent{agent})
+	g.setOnline(before, true)
+	if !h.online("ext") {
+		t.Error("a dispatch from before the reload could not set the agent online")
+	}
+	agent.URL = "http://127.0.0.1:2/"
+	g.Configure([]external.Agent{agent})
+	g.setOnline(before, false)
+	if !h.online("ext") {
+		t.Error("a dispatch to the old URL set the agent offline")
+	}
+}
+
+func TestStopClosesTheIdleConnectionOfTheCardFetch(t *testing.T) {
+	h := setup(t)
+	server := agentServer(t, func(http.ResponseWriter, *http.Request) {})
+	before := runtime.NumGoroutine()
+	g := New(h.engine, Options{Log: h.log})
+	g.Configure([]external.Agent{{
+		ID: "ext", Name: "ext", URL: server.URL, Token: "t", Description: "d",
+		Poll: time.Hour, CardTTL: time.Hour, ReplyTimeout: time.Hour, Idle: time.Hour, Retry: time.Hour, Offline: time.Hour,
+	}})
+	g.Start()
+	deadline := time.Now().Add(5 * time.Second)
+	for !h.online("ext") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	g.Stop()
+	deadline = time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := runtime.NumGoroutine(); n > before {
+		t.Errorf("%d goroutines, %d before", n, before)
 	}
 }
