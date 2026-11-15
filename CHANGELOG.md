@@ -16,5 +16,9 @@ All notable changes to a2a-hub are listed here. Versions follow SemVer.
 - The routes of the TypeScript hub: A2A 1.0 JSON-RPC and SSE at `/a2a/<agent>` with agent cards, `/agents`, and the link API with event streams, replay, heartbeat, and presence. JSON-RPC params also take the proto field names, such as `task_id`, and a role as its enum number.
 - The push sender with retries and a socket-level address check.
 - The built-in test agents `tck` and `echo` behind `--test-agents`.
+- The external agents file (`--external`, `HUB_EXTERNAL_FILE`) with the format, defaults, and checks of the TypeScript hub.
+- The gateway to external A2A agents: streamed dispatch, `GetTask` and `ListTasks` recovery, rate-limit retries, connect-failure backoff, `CancelTask`, and card refresh. The hub card of an external agent shows the configured description and the skills of the agent card.
+- `SIGHUP` reloads the external agents file. A bad file keeps the old agents.
+- A link stream ends when its client falls 10,000 events behind. The client gets the events in its replay.
 - The process suites in `test/process/` and the a2a-tck conformance job in CI.
 - A distroless container image that compiles the binary in a Go build stage. Its `/data` belongs to the `nonroot` user. CI builds and runs it on every push and pull request. It pushes it to `ghcr.io/orswn/a2a-hub:vX.Y.Z` only on a `v*` tag.

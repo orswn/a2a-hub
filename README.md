@@ -11,6 +11,7 @@ What exists now:
 - The server binary `a2a-hub`: flags and env, token file, the sqlite store with the same schema (`user_version` 2), `GET /healthz` with the online agent count, and the `healthcheck` subcommand.
 - The routes of the TypeScript hub: the A2A 1.0 JSON-RPC endpoint and agent card of each agent at `/a2a/<agent>`, `/agents`, and the link API with its event streams, heartbeat, and presence.
 - The push sender: it posts each task event to the webhooks of the task, with retries after 1 s, 5 s, and 30 s. It checks the address of each webhook again on the socket that it opens.
+- The gateway to external A2A agents, such as Hermes: it sends their hub tasks with `SendStreamingMessage`, maps the stream back to the hub task, falls back to `GetTask` after a dropped stream or a restart, retries after a rate limit or a connect failure, sends `CancelTask`, and refreshes each agent card. `SIGHUP` reloads the external agents file.
 - The built-in test agents `tck` and `echo` of `--test-agents`. The a2a-tck conformance suite runs against `tck` in CI.
 - The engine (`internal/engine`): agents and host binding, `@name` resolution, the task lifecycle, context follow-ups, status text, open questions, task scope, task lists with page tokens, the mailbox events with replay and ack, retention, push configs and the push outbox, and the job and dispatch rows of external agents. It writes the same rows as the TypeScript engine, so either hub opens a file that the other wrote.
 - The push URL guard (`internal/pushguard`): the config-time and send-time address checks and the allow list.
@@ -19,7 +20,6 @@ What exists now:
 
 Planned:
 
-- The gateway to external agents and the external agent file.
 - The `a2a` host CLI and the MCP endpoint for Claude Code and Codex.
 - A released container image. CI builds it now but pushes it only on a `v*` tag.
 
@@ -44,7 +44,7 @@ The hub prints `listening <port>` on stdout when it accepts connections. Logs go
 | `--listen <host:port>` | `HUB_LISTEN` | `0.0.0.0:8080` | Listen address. Port `0` picks a free port. An IPv6 host may be in brackets. |
 | `--data <dir>` | `HUB_DATA` | `/data` | Data directory with `hub.sqlite`. `:memory:` keeps the database in memory. |
 | `--tokens <file>` | `HUB_TOKENS_FILE` | none | Token file. Without it, only `/healthz` and agent cards answer. |
-| `--external <file>` | `HUB_EXTERNAL_FILE` | none | External A2A agents. Read in a later version. |
+| `--external <file>` | `HUB_EXTERNAL_FILE` | none | External A2A agents file. See below. |
 | `--test-agents` | `HUB_TEST_AGENTS=1` | off | Test mode: adds the built-in agents `tck` and `echo`, and adds loopback to the push allow list. |
 | `--public-url <url>` | `HUB_PUBLIC_URL` | none | Base URL in agent cards. Must start with `http://` or `https://`. |
 | `--push-allow <list>` | `HUB_PUSH_ALLOW` | empty | Comma list of host names, addresses, and CIDRs that push webhooks may reach although they are private. |
@@ -53,7 +53,7 @@ The hub prints `listening <port>` on stdout when it accepts connections. Logs go
 
 A flag wins over its env variable.
 
-Exit codes: `0` after `SIGTERM` or `SIGINT`, `1` for a bad command line or a start failure, `2` for a bad setting value. `SIGHUP` reloads the token file and keeps the old tokens if the new file is bad.
+Exit codes: `0` after `SIGTERM` or `SIGINT`, `1` for a bad command line or a start failure, `2` for a bad setting value. `SIGHUP` reloads the token file and the external agents file. For a bad file it keeps the old tokens or agents and logs the error. Open link streams stay open.
 
 The token file maps a principal name to its kind and the sha256 hex digest of its token:
 
@@ -63,6 +63,22 @@ The token file maps a principal name to its kind and the sha256 hex digest of it
 	"hermes": { "kind": "peer", "sha256": "<sha256 hex of the token>" }
 }
 ```
+
+The external agents file maps a hub agent id to the agent:
+
+```json
+{
+	"hermes": { "url": "http://hermes:9900/", "token": "<bearer token of the hub at Hermes>" }
+}
+```
+
+- `url` (required): the JSON-RPC URL of the agent. Its card is at `<url>/.well-known/agent-card.json`.
+- `token` (required): visible ASCII. The hub sends it as `Authorization: Bearer`.
+- `name`: what `@<name>` resolves to. Default: the id.
+- `description`: the description in the hub card. Default: `<name>: an external A2A agent`.
+- Timings in milliseconds: `pollMs` (`10000`, the `GetTask` and card retry interval), `cardTtlMs` (`600000`), `replyTimeoutMs` (`960000`, from dispatch to the final answer), `idleMs` (`30000`, the longest stream silence), `retryMs` (`60000`, the wait after a rate limit), `offlineMs` (`600000`, how long the hub retries an agent that it cannot connect to).
+
+A bad file at start stops the hub with exit code `1`. No error text quotes the file, because it holds plain tokens.
 
 `a2a-hub healthcheck` sends `GET /healthz` to the listen address from the same flags and env, and exits `0` only for status 200. It dials `127.0.0.1` for the host `0.0.0.0` and `::1` for the host `::`.
 
@@ -87,7 +103,7 @@ make verify
 - Database compatibility: the engine tests run one scenario that `internal/engine/testdata/compat.mjs` also runs with the TypeScript engine. Both must write the same rows, and the Go engine must read the committed TypeScript-written file in `testdata/compat-node` the same way. With `PIMON_DIR` set to a pimon checkout and `node` on `PATH`, the test also runs the TypeScript engine again and makes it read the file that the Go engine wrote.
 - Protocol package: `npm --prefix protocol test` checks that the committed JSON Schema matches the TypeBox source and that protocol 2 has not changed.
 - Contract suite: `npm --prefix test run contract` starts `bin/a2a-hub` (or env `HUB_BIN`) and checks it over HTTP and SSE against the JSON Schema.
-- Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, and a restart. With `HUB_BIN` set to a wrapper of the TypeScript hub, both suites also run against it.
+- Process suites: `npm --prefix test run process` starts the same binary and checks the A2A face with the `@a2a-js/sdk` client, the link API, push webhooks, a restart, and external agents behind a fake A2A agent (`test/support/fake-hermes.ts`). With `HUB_BIN` set to a wrapper of the TypeScript hub, both suites also run against it.
 - Conformance: CI runs a2a-tck against `/a2a/tck` of a hub with `--test-agents`. `scripts/tck-gate.py` fails the job on a failed MUST requirement or fewer than 75 MUST passes. `scripts/hub-python-client.py` then sends a task with the Python A2A SDK.
 
 ## Known wire differences from the TypeScript hub
@@ -99,6 +115,14 @@ make verify
 - A JSON-RPC body that is a JSON string is parsed again, as in `@a2a-js/sdk`. When that fails, the error text is `Failed to parse JSON request.`. `@a2a-js/sdk` sends the text of the V8 `SyntaxError`.
 - JSON-RPC params with a wrong JSON type are refused with `-32602` and the text `Invalid method parameters.`. Examples: a string `historyLength`, a number `id`, a string `includeArtifacts` or `returnImmediately`, a role number outside the enum, or a part with no content. A string `pageSize` gets `pageSize must be between 1 and 100`. The hub log has the detail. The TypeScript hub coerces such values or ignores them.
 - The path splits into its non-empty segments with no other normalization. `GET //healthz` gets `200`, and `GET /x/../healthz` gets `404`. The TypeScript hub parses the request target as a WHATWG URL: `//healthz` names the host `healthz` and gets `404`, and `/x/../healthz` loses its dot segments and gets `200`.
+
+Known gateway differences:
+
+- Requests to external agents have the headers of Go's HTTP client: `User-Agent: Go-http-client/1.1` and `Accept-Encoding: gzip`. The TypeScript hub sends the headers of Node `fetch`: `User-Agent: node`, `Accept-Encoding: gzip, deflate`, `Accept-Language: *`, and `Sec-Fetch-Mode: cors`. The A2A headers and bodies are the same.
+- A JSON answer or one stream event of an external agent may be at most 4 MiB. A larger stream event counts as a dropped stream. The TypeScript hub has no limit.
+- The error text of a connect failure is Go's text, such as `dial tcp 127.0.0.1:9: connect: connection refused (ECONNREFUSED)`. The TypeScript hub gives `fetch failed (ECONNREFUSED)`. Both name the same error code.
+- A link stream whose client falls 10,000 events behind ends, and the client gets the events in its replay when it reconnects. The TypeScript hub buffers without a limit.
+- A bad external agents file at start prints the error text. The TypeScript hub prints the stack trace.
 
 Known engine and push differences:
 
